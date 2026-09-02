@@ -225,3 +225,5 @@ ms-playwright/
 automations.json
 available_votes.json
 /state/
+
+/.vscode/
