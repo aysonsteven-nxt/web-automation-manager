@@ -1,34 +1,24 @@
-import argparse
+import sys
 
-from automation.config_loader import AutomationConfigLoader
-from automation.factory import AutomationFactory
-from automation.worker import AutomationWorker
+from automation.core.config_loader import AutomationConfigLoader
+from automation.core.worker import AutomationWorker
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Web Automation Manager worker"
-    )
+def main() -> None:
+    if len(sys.argv) != 2:
+        raise ValueError(
+            "Usage: "
+            "python run_automation.py <automation_id>"
+        )
 
-    parser.add_argument(
-        "--automation-id",
-        required=True,
-        help="ID of the automation to run",
-    )
-
-    args = parser.parse_args()
+    automation_id = sys.argv[1]
 
     config = AutomationConfigLoader.load_by_id(
-        args.automation_id
-    )
-
-    strategy = AutomationFactory.create(
-        config.strategy
+        automation_id
     )
 
     worker = AutomationWorker(
-        config=config,
-        strategy=strategy,
+        config
     )
 
     worker.run()

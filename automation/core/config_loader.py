@@ -1,12 +1,14 @@
 import json
 from pathlib import Path
 
-from automation.config import AutomationConfig
+from automation.core.config import AutomationConfig
 
 
 class AutomationConfigLoader:
-
-    CONFIG_FILE = Path(__file__).resolve().parent.parent / "automations.json"
+    CONFIG_FILE = (
+        Path(__file__).resolve().parent.parent.parent
+        / "automations.json"
+    )
 
     @classmethod
     def load_all(cls) -> list[AutomationConfig]:
@@ -15,7 +17,10 @@ class AutomationConfigLoader:
                 f"Automation configuration not found: {cls.CONFIG_FILE}"
             )
 
-        with cls.CONFIG_FILE.open("r", encoding="utf-8") as file:
+        with cls.CONFIG_FILE.open(
+            "r",
+            encoding="utf-8",
+        ) as file:
             data = json.load(file)
 
         automations = data.get("automations")
@@ -30,22 +35,16 @@ class AutomationConfigLoader:
                 "'automations' must be an array in automations.json"
             )
 
-        configs: list[AutomationConfig] = []
-
-        for item in automations:
-            if not isinstance(item, dict):
-                raise ValueError(
-                    "Each item in 'automations' must be an object"
-                )
-
-            configs.append(
-                AutomationConfig(**item)
-            )
-
-        return configs
+        return [
+            AutomationConfig(**item)
+            for item in automations
+        ]
 
     @classmethod
-    def load_by_id(cls, automation_id: str) -> AutomationConfig:
+    def load_by_id(
+        cls,
+        automation_id: str,
+    ) -> AutomationConfig:
         for config in cls.load_all():
             if config.id == automation_id:
                 return config

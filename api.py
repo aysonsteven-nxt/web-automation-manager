@@ -5,9 +5,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
 
-from automation.manager import automation_manager
-from automation_state import load_state
-from event_manager import event_manager
+from automation.core.events import event_manager
+from automation.core.manager import automation_manager
+from automation.core.state import load_state
 
 
 app = FastAPI(
@@ -34,45 +34,37 @@ def hello():
     }
 
 
-# =========================================================
-# Generic automation endpoints
-# =========================================================
-
 @app.get("/api/automations")
 def automation_list():
+
     result = []
 
     for process in automation_manager.list():
+
         status = process.status()
 
-        result.append({
-            "id": process.config.id,
-            "name": process.config.name,
-            "type": process.config.type,
-            "strategy": process.config.strategy,
-            "url": process.config.url,
-            "enabled": process.config.enabled,
-            "status": status,
-        })
+        result.append(
+            {
+                "id": process.config.id,
+                "name": process.config.name,
+                "type": process.config.type,
+                "strategy": process.config.strategy,
+                "url": process.config.config.get("url"),
+                "enabled": process.config.enabled,
+                "status": status,
+            }
+        )
 
     return result
-@app.get( "/api/automations/{automation_id}/votes" )
-def automation_votes( automation_id: str, ):
-    try: 
-        process = automation_manager.get( 
-                                         automation_id 
-        )
-        if not process.is_running(): raise HTTPException( status_code=503, detail=( "No vote state available yet. " "Start the voter first." ), )
-        state = load_state( Path(__file__).resolve().parent / process.config.state_file )
-        if state is None: raise HTTPException( status_code=503, detail=( "No vote state available yet. " "Start the voter first." ), )
-        return state
-    except ValueError as exc: raise HTTPException( status_code=404, detail=str(exc), )
+
+
 @app.get(
     "/api/automations/{automation_id}/status"
 )
 def automation_status(
     automation_id: str,
 ):
+
     try:
         return automation_manager.status(
             automation_id
@@ -91,7 +83,9 @@ def automation_status(
 def automation_pids(
     automation_id: str,
 ):
+
     try:
+
         pids = automation_manager.pids(
             automation_id
         )
@@ -103,6 +97,7 @@ def automation_pids(
         }
 
     except (KeyError, ValueError) as exc:
+
         raise HTTPException(
             status_code=404,
             detail=str(exc),
@@ -115,7 +110,9 @@ def automation_pids(
 async def start_automation(
     automation_id: str,
 ):
+
     try:
+
         started = automation_manager.start(
             automation_id
         )
@@ -136,12 +133,14 @@ async def start_automation(
         }
 
     except (KeyError, ValueError) as exc:
+
         raise HTTPException(
             status_code=404,
             detail=str(exc),
         )
 
     except Exception as exc:
+
         raise HTTPException(
             status_code=500,
             detail=str(exc),
@@ -154,7 +153,9 @@ async def start_automation(
 async def stop_automation(
     automation_id: str,
 ):
+
     try:
+
         stopped = automation_manager.stop(
             automation_id
         )
@@ -175,12 +176,14 @@ async def stop_automation(
         }
 
     except (KeyError, ValueError) as exc:
+
         raise HTTPException(
             status_code=404,
             detail=str(exc),
         )
 
     except Exception as exc:
+
         raise HTTPException(
             status_code=500,
             detail=str(exc),
@@ -193,7 +196,9 @@ async def stop_automation(
 async def stop_all_automation_workers(
     automation_id: str,
 ):
+
     try:
+
         stopped_pids = (
             automation_manager.stop_all(
                 automation_id
@@ -217,21 +222,19 @@ async def stop_all_automation_workers(
         }
 
     except (KeyError, ValueError) as exc:
+
         raise HTTPException(
             status_code=404,
             detail=str(exc),
         )
 
     except Exception as exc:
+
         raise HTTPException(
             status_code=500,
             detail=str(exc),
         )
 
-
-# =========================================================
-# Automation state
-# =========================================================
 
 @app.get(
     "/api/automations/{automation_id}/state"
@@ -239,7 +242,9 @@ async def stop_all_automation_workers(
 def automation_state(
     automation_id: str,
 ):
+
     try:
+
         process = automation_manager.get(
             automation_id
         )
@@ -254,23 +259,24 @@ def automation_state(
         )
 
         if state is None:
+
             raise HTTPException(
                 status_code=404,
-                detail="No automation state available yet.",
+                detail=(
+                    "No automation state "
+                    "available yet."
+                ),
             )
 
         return state
 
     except (KeyError, ValueError) as exc:
+
         raise HTTPException(
             status_code=404,
             detail=str(exc),
         )
 
-
-# =========================================================
-# Internal worker -> API
-# =========================================================
 
 @app.post(
     "/api/internal/automation/state"
@@ -278,31 +284,34 @@ def automation_state(
 async def automation_state_update(
     state: dict[str, Any],
 ):
+
     await event_manager.broadcast(
         "automation_state",
         state,
     )
 
     return {
-        "received": True,
+        "received": True
     }
 
 
-# =========================================================
-# SSE
-# =========================================================
-
 @app.get("/api/events")
 async def events():
+
     queue = await event_manager.connect()
 
     async def event_generator():
+
         try:
+
             while True:
+
                 event = await queue.get()
+
                 yield event
 
         finally:
+
             event_manager.disconnect(
                 queue
             )
@@ -312,12 +321,9 @@ async def events():
     )
 
 
-# =========================================================
-# Temporary SSE test
-# =========================================================
-
 @app.post("/api/events/test")
 async def test_event():
+
     await event_manager.broadcast(
         "test",
         {
