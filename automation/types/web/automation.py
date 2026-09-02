@@ -47,7 +47,7 @@ class WebAutomation:
         self.playwright = sync_playwright().start()
 
         self.browser = self.playwright.chromium.launch(
-            headless=False,
+            headless=True,
         )
 
         session_file = Path(
