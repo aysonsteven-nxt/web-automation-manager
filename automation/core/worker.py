@@ -23,11 +23,8 @@ class AutomationWorker:
             )
         )
 
-        self.strategy = (
-            AutomationFactory.create_strategy(
-                config.type,
-                config.strategy,
-            )
+        self.strategy = AutomationFactory.create_strategy(
+            config,
         )
 
     def run(self) -> None:

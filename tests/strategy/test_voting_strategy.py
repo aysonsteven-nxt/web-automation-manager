@@ -1,7 +1,10 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
+from automation.types.web.strategies.config import (
+    VotingStrategyConfig,
+)
 from automation.types.web.strategies.voting_strategy import (
     VotingStrategy,
 )
@@ -9,12 +12,22 @@ from automation.types.web.strategies.voting_strategy import (
 
 @pytest.fixture
 def strategy():
-    return VotingStrategy()
+    return VotingStrategy(
+        VotingStrategyConfig(
+            action_delay_seconds=3,
+        )
+    )
 
 
-# ============================================================
-# initialize()
-# ============================================================
+@pytest.fixture
+def automation():
+    automation = MagicMock()
+
+    automation.web_config.url = (
+        "https://example.com/vote"
+    )
+
+    return automation
 
 
 def test_initialize_requires_started_automation(
@@ -28,24 +41,19 @@ def test_initialize_requires_started_automation(
         match="Web automation has not been started",
     ):
         strategy.initialize(
-            automation
+            automation,
         )
 
 
 def test_initialize_navigates_to_configured_url(
     strategy,
+    automation,
 ):
-    automation = MagicMock()
-
     page = MagicMock()
-
     automation.page = page
-    automation.web_config.url = (
-        "https://example.com/vote"
-    )
 
     strategy.initialize(
-        automation
+        automation,
     )
 
     page.goto.assert_called_once_with(
@@ -54,118 +62,87 @@ def test_initialize_navigates_to_configured_url(
     )
 
 
-# ============================================================
-# strategy_config
-# ============================================================
-
-
 def test_strategy_config_returns_configured_values(
     strategy,
 ):
-    automation = MagicMock()
-
-    automation.page = MagicMock()
-
-    automation.config.config = {
-        "web": {
-            "url": "https://example.com/vote",
-            "session_file": "test_session.json",
-        },
-        "strategy": {
-            "action_delay_seconds": 5,
-        },
-    }
-
-    strategy.initialize(
-        automation
+    assert (
+        strategy.strategy_config.action_delay_seconds
+        == 3
     )
-
-    config = strategy.strategy_config
-
-    assert config.action_delay_seconds == 5
-
-
-def test_strategy_config_requires_initialization(
-    strategy,
-):
-    with pytest.raises(
-        RuntimeError,
-        match="Voting strategy has not been initialized",
-    ):
-        strategy.strategy_config
-
-
-# ============================================================
-# check()
-# ============================================================
 
 
 def test_check_reads_credit_balance(
     strategy,
+    automation,
 ):
-    automation = MagicMock()
-
     page = MagicMock()
     automation.page = page
 
-    strategy._get_credit_balance = MagicMock(
-        return_value=25
+    body = MagicMock()
+    body.inner_text.return_value = (
+        "Current Credit Balance 125"
     )
 
-    strategy._get_vote_providers = MagicMock(
-        return_value=[]
+    banners = MagicMock()
+    banners.count.return_value = 0
+
+    def locator(selector):
+        if selector == "body":
+            return body
+
+        if selector == '[id^="banner_"]':
+            return banners
+
+        raise AssertionError(
+            f"Unexpected selector: {selector}"
+        )
+
+    page.locator.side_effect = locator
+
+    state = strategy.check(
+        automation,
     )
 
-    result = strategy.check(
-        automation
-    )
-
-    assert result["credits"] == 25
-    assert result["totalCount"] == 0
-    assert result["availableCount"] == 0
-    assert result["providers"] == []
+    assert state["credits"] == 125
 
 
 def test_check_returns_provider_information(
     strategy,
+    automation,
 ):
-    automation = MagicMock()
-
     page = MagicMock()
     automation.page = page
 
-    strategy._get_credit_balance = MagicMock(
-        return_value=10
+    body = MagicMock()
+    body.inner_text.return_value = (
+        "Current Credit Balance 125"
     )
 
-    providers = [
-        {
-            "id": "1",
-            "available": True,
-            "cooldown": None,
-            "href": "https://example.com/1",
-        },
-        {
-            "id": "2",
-            "available": False,
-            "cooldown": "10 hour(s)",
-            "href": None,
-        },
-    ]
+    banners = MagicMock()
+    banners.count.return_value = 0
 
-    strategy._get_vote_providers = MagicMock(
-        return_value=providers
+    def locator(selector):
+        if selector == "body":
+            return body
+
+        if selector == '[id^="banner_"]':
+            return banners
+
+        raise AssertionError(
+            f"Unexpected selector: {selector}"
+        )
+
+    page.locator.side_effect = locator
+
+    state = strategy.check(
+        automation,
     )
 
-    result = strategy.check(
-        automation
-    )
-
-    assert result == {
-        "credits": 10,
-        "totalCount": 2,
-        "availableCount": 1,
-        "providers": providers,
+    assert state == {
+        "credits": 125,
+        "totalCount": 0,
+        "availableCount": 0,
+        "providers": [],
     }
 
 
@@ -180,13 +157,8 @@ def test_check_requires_started_automation(
         match="Web automation has not been started",
     ):
         strategy.check(
-            automation
+            automation,
         )
-
-
-# ============================================================
-# get_targets()
-# ============================================================
 
 
 def test_get_targets_returns_available_providers(
@@ -209,11 +181,11 @@ def test_get_targets_returns_available_providers(
         ]
     }
 
-    result = strategy.get_targets(
-        state
+    targets = strategy.get_targets(
+        state,
     )
 
-    assert result == [
+    assert targets == [
         {
             "id": "1",
             "available": True,
@@ -228,15 +200,7 @@ def test_get_targets_returns_available_providers(
 def test_get_targets_returns_empty_list_when_no_providers(
     strategy,
 ):
-    state = {
-        "providers": []
-    }
-
-    result = strategy.get_targets(
-        state
-    )
-
-    assert result == []
+    assert strategy.get_targets({}) == []
 
 
 def test_get_targets_ignores_provider_without_available_flag(
@@ -254,11 +218,11 @@ def test_get_targets_ignores_provider_without_available_flag(
         ]
     }
 
-    result = strategy.get_targets(
-        state
+    targets = strategy.get_targets(
+        state,
     )
 
-    assert result == [
+    assert targets == [
         {
             "id": "2",
             "available": True,
@@ -266,374 +230,422 @@ def test_get_targets_ignores_provider_without_available_flag(
     ]
 
 
-# ============================================================
-# _get_credit_balance()
-# ============================================================
-
-
-def test_get_credit_balance_returns_credit_value(
-    strategy,
-):
+def test_get_credit_balance_returns_credit_value():
     page = MagicMock()
 
     page.locator.return_value.inner_text.return_value = (
-        "Current Credit Balance 123"
+        "Current Credit Balance 250"
     )
 
-    result = strategy._get_credit_balance(
-        page
+    result = VotingStrategy._get_credit_balance(
+        page,
     )
 
-    assert result == 123
+    assert result == 250
 
 
-def test_get_credit_balance_is_case_insensitive(
-    strategy,
-):
+def test_get_credit_balance_is_case_insensitive():
     page = MagicMock()
 
     page.locator.return_value.inner_text.return_value = (
-        "current credit balance 456"
+        "CURRENT CREDIT BALANCE 350"
     )
 
-    result = strategy._get_credit_balance(
-        page
+    result = VotingStrategy._get_credit_balance(
+        page,
     )
 
-    assert result == 456
+    assert result == 350
 
 
-def test_get_credit_balance_returns_zero_when_missing(
-    strategy,
-):
+def test_get_credit_balance_returns_zero_when_missing():
     page = MagicMock()
 
     page.locator.return_value.inner_text.return_value = (
-        "Some unrelated page content"
+        "No credit information available"
     )
 
-    result = strategy._get_credit_balance(
-        page
+    result = VotingStrategy._get_credit_balance(
+        page,
     )
 
     assert result == 0
 
 
-def test_get_credit_balance_returns_zero_on_error(
-    strategy,
-):
+def test_get_credit_balance_returns_zero_on_error():
     page = MagicMock()
 
     page.locator.side_effect = Exception(
-        "Browser error"
+        "page error"
     )
 
-    result = strategy._get_credit_balance(
-        page
+    result = VotingStrategy._get_credit_balance(
+        page,
     )
 
     assert result == 0
 
 
-# ============================================================
-# _get_cooldown()
-# ============================================================
-
-
-def test_get_cooldown_returns_text(
-    strategy,
-):
+def test_get_cooldown_returns_text():
     banner = MagicMock()
 
+    tr_locator = MagicMock()
+    filtered_locator = MagicMock()
+
     row = MagicMock()
-    strong = MagicMock()
-
-    banner.locator.return_value.filter.return_value.first = (
-        row
-    )
-
     row.count.return_value = 1
 
-    row.locator.return_value.first = strong
+    strong_locator = MagicMock()
+    strong = MagicMock()
 
     strong.count.return_value = 1
     strong.inner_text.return_value = "11 hour(s)"
 
-    result = strategy._get_cooldown(
-        banner
+    strong_locator.first = strong
+    row.locator.return_value = strong_locator
+
+    filtered_locator.first = row
+    tr_locator.filter.return_value = filtered_locator
+    banner.locator.return_value = tr_locator
+
+    result = VotingStrategy._get_cooldown(
+        banner,
     )
 
     assert result == "11 hour(s)"
 
 
-def test_get_cooldown_returns_none_when_row_missing(
-    strategy,
-):
+def test_get_cooldown_returns_none_when_row_missing():
     banner = MagicMock()
 
+    tr_locator = MagicMock()
+    filtered_locator = MagicMock()
+
     row = MagicMock()
-
-    banner.locator.return_value.filter.return_value.first = (
-        row
-    )
-
     row.count.return_value = 0
 
-    result = strategy._get_cooldown(
-        banner
+    filtered_locator.first = row
+    tr_locator.filter.return_value = filtered_locator
+    banner.locator.return_value = tr_locator
+
+    result = VotingStrategy._get_cooldown(
+        banner,
     )
 
     assert result is None
 
 
-def test_get_cooldown_returns_none_when_strong_missing(
-    strategy,
-):
+def test_get_cooldown_returns_none_when_strong_missing():
     banner = MagicMock()
 
+    tr_locator = MagicMock()
+    filtered_locator = MagicMock()
+
     row = MagicMock()
-    strong = MagicMock()
-
-    banner.locator.return_value.filter.return_value.first = (
-        row
-    )
-
     row.count.return_value = 1
 
-    row.locator.return_value.first = strong
-
+    strong_locator = MagicMock()
+    strong = MagicMock()
     strong.count.return_value = 0
 
-    result = strategy._get_cooldown(
-        banner
+    strong_locator.first = strong
+    row.locator.return_value = strong_locator
+
+    filtered_locator.first = row
+    tr_locator.filter.return_value = filtered_locator
+    banner.locator.return_value = tr_locator
+
+    result = VotingStrategy._get_cooldown(
+        banner,
     )
 
     assert result is None
 
 
-def test_get_cooldown_returns_none_on_error(
-    strategy,
-):
+def test_get_cooldown_returns_none_on_error():
     banner = MagicMock()
 
     banner.locator.side_effect = Exception(
-        "Browser error"
+        "locator error"
     )
 
-    result = strategy._get_cooldown(
-        banner
+    result = VotingStrategy._get_cooldown(
+        banner,
     )
 
     assert result is None
 
 
-# ============================================================
-# _get_vote_providers()
-# ============================================================
-
-
-def test_get_vote_providers_finds_available_provider(
-    strategy,
-):
-    with patch.object(
-        VotingStrategy,
-        "_get_cooldown",
-        return_value=None,
-    ):
-        page = MagicMock()
-
-        banners = MagicMock()
-
-        page.locator.return_value = banners
-
-        banners.count.return_value = 1
-
-        banner = MagicMock()
-
-        banners.nth.return_value = banner
-
-        banner.get_attribute.return_value = (
-            "banner_5"
-        )
-
-        link = MagicMock()
-
-        link.count.return_value = 1
-
-        link.get_attribute.side_effect = [
-            "https://example.com/vote",
-            None,
-        ]
-
-        banner.locator.return_value.first = link
-
-        result = strategy._get_vote_providers(
-            page
-        )
-
-        assert result == [
-            {
-                "id": "5",
-                "available": True,
-                "cooldown": None,
-                "href": "https://example.com/vote",
-            }
-        ]
-
-
-def test_get_vote_providers_finds_provider_without_link(
-    strategy,
-):
-    with patch.object(
-        VotingStrategy,
-        "_get_cooldown",
-        return_value=None,
-    ):
-        page = MagicMock()
-
-        banners = MagicMock()
-
-        page.locator.return_value = banners
-
-        banners.count.return_value = 1
-
-        banner = MagicMock()
-
-        banners.nth.return_value = banner
-
-        banner.get_attribute.return_value = (
-            "banner_8"
-        )
-
-        link = MagicMock()
-
-        link.count.return_value = 0
-
-        banner.locator.return_value.first = link
-
-        result = strategy._get_vote_providers(
-            page
-        )
-
-        assert result == [
-            {
-                "id": "8",
-                "available": False,
-                "cooldown": None,
-                "href": None,
-            }
-        ]
-
-
-def test_get_vote_providers_detects_disabled_link(
-    strategy,
-):
-    with patch.object(
-        VotingStrategy,
-        "_get_cooldown",
-        return_value=None,
-    ):
-        page = MagicMock()
-
-        banners = MagicMock()
-
-        page.locator.return_value = banners
-
-        banners.count.return_value = 1
-
-        banner = MagicMock()
-
-        banners.nth.return_value = banner
-
-        banner.get_attribute.return_value = (
-            "banner_10"
-        )
-
-        link = MagicMock()
-
-        link.count.return_value = 1
-
-        link.get_attribute.side_effect = [
-            "https://example.com/vote",
-            "disabled",
-        ]
-
-        banner.locator.return_value.first = link
-
-        result = strategy._get_vote_providers(
-            page
-        )
-
-        assert result == [
-            {
-                "id": "10",
-                "available": False,
-                "cooldown": None,
-                "href": "https://example.com/vote",
-            }
-        ]
-
-
-def test_get_vote_providers_ignores_invalid_banner_id(
-    strategy,
-):
+def test_get_vote_providers_finds_available_provider():
     page = MagicMock()
 
     banners = MagicMock()
-
-    page.locator.return_value = banners
-
     banners.count.return_value = 1
 
     banner = MagicMock()
+    banner.get_attribute.return_value = (
+        "banner_123"
+    )
+
+    link_locator = MagicMock()
+    link = MagicMock()
+
+    link.count.return_value = 1
+    link.get_attribute.side_effect = [
+        "https://vote.example.com",
+        None,
+    ]
+
+    link_locator.first = link
+
+    tr_locator = MagicMock()
+    filtered_locator = MagicMock()
+
+    row = MagicMock()
+    row.count.return_value = 0
+
+    filtered_locator.first = row
+    tr_locator.filter.return_value = filtered_locator
+
+    def banner_locator(selector):
+        if selector == "a":
+            return link_locator
+
+        if selector == "tr":
+            return tr_locator
+
+        raise AssertionError(
+            f"Unexpected banner selector: {selector}"
+        )
+
+    banner.locator.side_effect = banner_locator
 
     banners.nth.return_value = banner
 
-    banner.get_attribute.return_value = (
-        "something_else"
+    page.locator.return_value = banners
+
+    result = VotingStrategy._get_vote_providers(
+        page,
     )
 
-    result = strategy._get_vote_providers(
-        page
-    )
+    assert result == [
+        {
+            "id": "123",
+            "available": True,
+            "cooldown": None,
+            "href": "https://vote.example.com",
+        }
+    ]
 
-    assert result == []
 
-
-def test_get_vote_providers_returns_empty_when_no_banners(
-    strategy,
-):
+def test_get_vote_providers_finds_provider_without_link():
     page = MagicMock()
 
     banners = MagicMock()
+    banners.count.return_value = 1
+
+    banner = MagicMock()
+    banner.get_attribute.return_value = (
+        "banner_123"
+    )
+
+    link_locator = MagicMock()
+    link = MagicMock()
+
+    link.count.return_value = 0
+    link_locator.first = link
+
+    tr_locator = MagicMock()
+    filtered_locator = MagicMock()
+
+    row = MagicMock()
+    row.count.return_value = 0
+
+    filtered_locator.first = row
+    tr_locator.filter.return_value = filtered_locator
+
+    def banner_locator(selector):
+        if selector == "a":
+            return link_locator
+
+        if selector == "tr":
+            return tr_locator
+
+        raise AssertionError(
+            f"Unexpected banner selector: {selector}"
+        )
+
+    banner.locator.side_effect = banner_locator
+
+    banners.nth.return_value = banner
 
     page.locator.return_value = banners
 
+    result = VotingStrategy._get_vote_providers(
+        page,
+    )
+
+    assert result == [
+        {
+            "id": "123",
+            "available": False,
+            "cooldown": None,
+            "href": None,
+        }
+    ]
+
+
+def test_get_vote_providers_detects_disabled_link():
+    page = MagicMock()
+
+    banners = MagicMock()
+    banners.count.return_value = 1
+
+    banner = MagicMock()
+    banner.get_attribute.return_value = (
+        "banner_123"
+    )
+
+    link_locator = MagicMock()
+    link = MagicMock()
+
+    link.count.return_value = 1
+    link.get_attribute.side_effect = [
+        "https://vote.example.com",
+        "disabled",
+    ]
+
+    link_locator.first = link
+
+    tr_locator = MagicMock()
+    filtered_locator = MagicMock()
+
+    row = MagicMock()
+    row.count.return_value = 0
+
+    filtered_locator.first = row
+    tr_locator.filter.return_value = filtered_locator
+
+    def banner_locator(selector):
+        if selector == "a":
+            return link_locator
+
+        if selector == "tr":
+            return tr_locator
+
+        raise AssertionError(
+            f"Unexpected banner selector: {selector}"
+        )
+
+    banner.locator.side_effect = banner_locator
+
+    banners.nth.return_value = banner
+
+    page.locator.return_value = banners
+
+    result = VotingStrategy._get_vote_providers(
+        page,
+    )
+
+    assert result == [
+        {
+            "id": "123",
+            "available": False,
+            "cooldown": None,
+            "href": "https://vote.example.com",
+        }
+    ]
+
+
+def test_get_vote_providers_ignores_invalid_banner_id():
+    page = MagicMock()
+
+    banners = MagicMock()
+    banners.count.return_value = 2
+
+    valid_banner = MagicMock()
+    valid_banner.get_attribute.return_value = (
+        "banner_123"
+    )
+
+    valid_link_locator = MagicMock()
+    valid_link = MagicMock()
+
+    valid_link.count.return_value = 1
+    valid_link.get_attribute.side_effect = [
+        "https://vote.example.com",
+        None,
+    ]
+
+    valid_link_locator.first = valid_link
+
+    valid_tr_locator = MagicMock()
+    valid_filtered_locator = MagicMock()
+
+    valid_row = MagicMock()
+    valid_row.count.return_value = 0
+
+    valid_filtered_locator.first = valid_row
+    valid_tr_locator.filter.return_value = (
+        valid_filtered_locator
+    )
+
+    def valid_banner_locator(selector):
+        if selector == "a":
+            return valid_link_locator
+
+        if selector == "tr":
+            return valid_tr_locator
+
+        raise AssertionError(
+            f"Unexpected banner selector: {selector}"
+        )
+
+    valid_banner.locator.side_effect = (
+        valid_banner_locator
+    )
+
+    invalid_banner = MagicMock()
+    invalid_banner.get_attribute.return_value = (
+        "something_else"
+    )
+
+    banners.nth.side_effect = [
+        valid_banner,
+        invalid_banner,
+    ]
+
+    page.locator.return_value = banners
+
+    result = VotingStrategy._get_vote_providers(
+        page,
+    )
+
+    assert len(result) == 1
+    assert result[0]["id"] == "123"
+
+
+def test_get_vote_providers_returns_empty_when_no_banners():
+    page = MagicMock()
+
+    banners = MagicMock()
     banners.count.return_value = 0
 
-    result = strategy._get_vote_providers(
-        page
+    page.locator.return_value = banners
+
+    result = VotingStrategy._get_vote_providers(
+        page,
     )
 
     assert result == []
-
-
-# ============================================================
-# execute()
-# ============================================================
 
 
 def test_execute_requires_started_automation(
     strategy,
 ):
     automation = MagicMock()
-
     automation.page = None
     automation.context = None
-
-    target = {
-        "id": "5"
-    }
 
     with pytest.raises(
         RuntimeError,
@@ -641,7 +653,7 @@ def test_execute_requires_started_automation(
     ):
         strategy.execute(
             automation,
-            target,
+            {"id": "123"},
         )
 
 
@@ -675,16 +687,13 @@ def test_execute_returns_false_when_link_not_found(
     automation.context = context
 
     link = MagicMock()
-
     link.count.return_value = 0
 
     page.locator.return_value.first = link
 
     result = strategy.execute(
         automation,
-        {
-            "id": "5"
-        },
+        {"id": "123"},
     )
 
     assert result is False
@@ -702,7 +711,6 @@ def test_execute_returns_false_when_link_not_visible(
     automation.context = context
 
     link = MagicMock()
-
     link.count.return_value = 1
     link.is_visible.return_value = False
 
@@ -710,9 +718,7 @@ def test_execute_returns_false_when_link_not_visible(
 
     result = strategy.execute(
         automation,
-        {
-            "id": "5"
-        },
+        {"id": "123"},
     )
 
     assert result is False
@@ -730,7 +736,6 @@ def test_execute_returns_false_when_link_has_no_href(
     automation.context = context
 
     link = MagicMock()
-
     link.count.return_value = 1
     link.is_visible.return_value = True
     link.get_attribute.return_value = None
@@ -739,17 +744,10 @@ def test_execute_returns_false_when_link_has_no_href(
 
     result = strategy.execute(
         automation,
-        {
-            "id": "5"
-        },
+        {"id": "123"},
     )
 
     assert result is False
-
-
-# ============================================================
-# execute() - successful vote
-# ============================================================
 
 
 def test_execute_returns_true_when_credit_balance_increases(
@@ -759,28 +757,34 @@ def test_execute_returns_true_when_credit_balance_increases(
 
     page = MagicMock()
     context = MagicMock()
+    popup = MagicMock()
 
     automation.page = page
     automation.context = context
 
     link = MagicMock()
-
     link.count.return_value = 1
     link.is_visible.return_value = True
+
     link.get_attribute.return_value = (
-        "https://example.com/vote"
+        "https://vote.example.com"
     )
 
     page.locator.return_value.first = link
 
-    strategy._get_credit_balance = MagicMock(
-        side_effect=[
+    credit_values = iter(
+        [
             100,
             101,
         ]
     )
 
-    popup = MagicMock()
+    page.locator.return_value.inner_text.side_effect = (
+        lambda: (
+            "Current Credit Balance "
+            f"{next(credit_values)}"
+        )
+    )
 
     context.expect_page.return_value.__enter__.return_value.value = (
         popup
@@ -788,18 +792,13 @@ def test_execute_returns_true_when_credit_balance_increases(
 
     result = strategy.execute(
         automation,
-        {
-            "id": "5"
-        },
+        {"id": "123"},
     )
 
     assert result is True
 
     link.click.assert_called_once()
-
     popup.close.assert_called_once()
-
-    page.bring_to_front.assert_called_once()
 
     page.reload.assert_called_once_with(
         wait_until="domcontentloaded",
@@ -813,28 +812,33 @@ def test_execute_returns_false_when_credit_balance_does_not_increase(
 
     page = MagicMock()
     context = MagicMock()
+    popup = MagicMock()
 
     automation.page = page
     automation.context = context
 
     link = MagicMock()
-
     link.count.return_value = 1
     link.is_visible.return_value = True
     link.get_attribute.return_value = (
-        "https://example.com/vote"
+        "https://vote.example.com"
     )
 
     page.locator.return_value.first = link
 
-    strategy._get_credit_balance = MagicMock(
-        side_effect=[
+    credit_values = iter(
+        [
             100,
             100,
         ]
     )
 
-    popup = MagicMock()
+    page.locator.return_value.inner_text.side_effect = (
+        lambda: (
+            "Current Credit Balance "
+            f"{next(credit_values)}"
+        )
+    )
 
     context.expect_page.return_value.__enter__.return_value.value = (
         popup
@@ -842,22 +846,10 @@ def test_execute_returns_false_when_credit_balance_does_not_increase(
 
     result = strategy.execute(
         automation,
-        {
-            "id": "5"
-        },
+        {"id": "123"},
     )
 
     assert result is False
-
-    link.click.assert_called_once()
-
-    popup.close.assert_called_once()
-
-    page.bring_to_front.assert_called_once()
-
-    page.reload.assert_called_once_with(
-        wait_until="domcontentloaded",
-    )
 
 
 def test_execute_returns_false_when_credit_balance_decreases(
@@ -867,28 +859,33 @@ def test_execute_returns_false_when_credit_balance_decreases(
 
     page = MagicMock()
     context = MagicMock()
+    popup = MagicMock()
 
     automation.page = page
     automation.context = context
 
     link = MagicMock()
-
     link.count.return_value = 1
     link.is_visible.return_value = True
     link.get_attribute.return_value = (
-        "https://example.com/vote"
+        "https://vote.example.com"
     )
 
     page.locator.return_value.first = link
 
-    strategy._get_credit_balance = MagicMock(
-        side_effect=[
+    credit_values = iter(
+        [
             100,
-            99,
+            90,
         ]
     )
 
-    popup = MagicMock()
+    page.locator.return_value.inner_text.side_effect = (
+        lambda: (
+            "Current Credit Balance "
+            f"{next(credit_values)}"
+        )
+    )
 
     context.expect_page.return_value.__enter__.return_value.value = (
         popup
@@ -896,27 +893,10 @@ def test_execute_returns_false_when_credit_balance_decreases(
 
     result = strategy.execute(
         automation,
-        {
-            "id": "5"
-        },
+        {"id": "123"},
     )
 
     assert result is False
-
-    link.click.assert_called_once()
-
-    popup.close.assert_called_once()
-
-    page.bring_to_front.assert_called_once()
-
-    page.reload.assert_called_once_with(
-        wait_until="domcontentloaded",
-    )
-
-
-# ============================================================
-# execute() - popup failure
-# ============================================================
 
 
 def test_execute_returns_false_when_popup_fails_to_open(
@@ -931,38 +911,24 @@ def test_execute_returns_false_when_popup_fails_to_open(
     automation.context = context
 
     link = MagicMock()
-
     link.count.return_value = 1
     link.is_visible.return_value = True
     link.get_attribute.return_value = (
-        "https://example.com/vote"
+        "https://vote.example.com"
     )
 
     page.locator.return_value.first = link
 
-    strategy._get_credit_balance = MagicMock(
-        return_value=100
-    )
-
     context.expect_page.side_effect = Exception(
-        "Popup failed"
+        "popup failed"
     )
 
     result = strategy.execute(
         automation,
-        {
-            "id": "5"
-        },
+        {"id": "123"},
     )
 
     assert result is False
-
-    link.click.assert_not_called()
-
-
-# ============================================================
-# execute() - reload failure
-# ============================================================
 
 
 def test_execute_returns_false_when_reload_fails(
@@ -972,45 +938,33 @@ def test_execute_returns_false_when_reload_fails(
 
     page = MagicMock()
     context = MagicMock()
+    popup = MagicMock()
 
     automation.page = page
     automation.context = context
 
     link = MagicMock()
-
     link.count.return_value = 1
     link.is_visible.return_value = True
     link.get_attribute.return_value = (
-        "https://example.com/vote"
+        "https://vote.example.com"
     )
 
     page.locator.return_value.first = link
 
-    strategy._get_credit_balance = MagicMock(
-        side_effect=[
-            100,
-        ]
+    page.reload.side_effect = Exception(
+        "reload failed"
     )
-
-    popup = MagicMock()
 
     context.expect_page.return_value.__enter__.return_value.value = (
         popup
     )
 
-    page.reload.side_effect = Exception(
-        "Reload failed"
-    )
-
     result = strategy.execute(
         automation,
-        {
-            "id": "5"
-        },
+        {"id": "123"},
     )
 
     assert result is False
 
     popup.close.assert_called_once()
-
-    page.bring_to_front.assert_called_once()

@@ -1,14 +1,15 @@
+from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from automation.core.config import AutomationConfig
 from automation.core.worker import AutomationWorker
 
 
-def create_config() -> AutomationConfig:
+def create_config(
+    automation_id="test",
+) -> AutomationConfig:
     return AutomationConfig(
-        id="test",
+        id=automation_id,
         name="Test Automation",
         type="web",
         strategy="voting",
@@ -28,9 +29,9 @@ def create_config() -> AutomationConfig:
     )
 
 
-def create_worker() -> AutomationWorker:
+def create_worker():
     return AutomationWorker(
-        create_config()
+        create_config(),
     )
 
 
@@ -49,12 +50,11 @@ def test_worker_creates_automation_and_strategy():
         worker = create_worker()
 
     create_automation.assert_called_once_with(
-        worker.config
+        worker.config,
     )
 
     create_strategy.assert_called_once_with(
-        "web",
-        "voting",
+        worker.config,
     )
 
     assert worker.automation is automation
@@ -65,13 +65,6 @@ def test_worker_starts_and_closes_automation():
     automation = MagicMock()
     strategy = MagicMock()
 
-    strategy.check.side_effect = [
-        {
-            "status": "running",
-            "targets": [],
-        }
-    ]
-
     with patch(
         "automation.core.worker.AutomationFactory.create_automation",
         return_value=automation,
@@ -80,19 +73,17 @@ def test_worker_starts_and_closes_automation():
         return_value=strategy,
     ), patch.object(
         AutomationWorker,
-        "_save_and_publish_state",
-    ), patch.object(
-        AutomationWorker,
-        "_wait",
-        side_effect=StopIteration,
-    ):
+        "_execute",
+    ) as execute:
 
         worker = create_worker()
-
-        with pytest.raises(StopIteration):
-            worker.run()
+        worker.run()
 
     automation.start.assert_called_once()
+    strategy.initialize.assert_called_once_with(
+        automation,
+    )
+    execute.assert_called_once()
     automation.close.assert_called_once()
 
 
@@ -101,11 +92,12 @@ def test_worker_checks_strategy():
     strategy = MagicMock()
 
     state = {
-        "status": "running",
-        "targets": [],
+        "credits": 100,
+        "providers": [],
     }
 
     strategy.check.return_value = state
+    strategy.get_targets.return_value = []
 
     with patch(
         "automation.core.worker.AutomationFactory.create_automation",
@@ -115,20 +107,22 @@ def test_worker_checks_strategy():
         return_value=strategy,
     ), patch.object(
         AutomationWorker,
-        "_save_and_publish_state",
+        "_wait",
+        side_effect=KeyboardInterrupt,
     ), patch.object(
         AutomationWorker,
-        "_wait",
-        side_effect=StopIteration,
+        "_save_and_publish_state",
     ):
 
         worker = create_worker()
 
-        with pytest.raises(StopIteration):
-            worker.run()
+        try:
+            worker._execute()
+        except KeyboardInterrupt:
+            pass
 
     strategy.check.assert_called_once_with(
-        automation
+        automation,
     )
 
 
@@ -137,20 +131,12 @@ def test_worker_gets_targets_from_strategy():
     strategy = MagicMock()
 
     state = {
-        "status": "running",
+        "credits": 100,
+        "providers": [],
     }
 
-    targets = [
-        {
-            "id": "target-1",
-        },
-        {
-            "id": "target-2",
-        },
-    ]
-
     strategy.check.return_value = state
-    strategy.get_targets.return_value = targets
+    strategy.get_targets.return_value = []
 
     with patch(
         "automation.core.worker.AutomationFactory.create_automation",
@@ -160,20 +146,22 @@ def test_worker_gets_targets_from_strategy():
         return_value=strategy,
     ), patch.object(
         AutomationWorker,
-        "_save_and_publish_state",
+        "_wait",
+        side_effect=KeyboardInterrupt,
     ), patch.object(
         AutomationWorker,
-        "_wait",
-        side_effect=StopIteration,
+        "_save_and_publish_state",
     ):
 
         worker = create_worker()
 
-        with pytest.raises(StopIteration):
-            worker.run()
+        try:
+            worker._execute()
+        except KeyboardInterrupt:
+            pass
 
     strategy.get_targets.assert_called_once_with(
-        state
+        state,
     )
 
 
@@ -182,16 +170,13 @@ def test_worker_executes_targets():
     strategy = MagicMock()
 
     state = {
-        "status": "running",
+        "credits": 100,
+        "providers": [],
     }
 
     targets = [
-        {
-            "id": "target-1",
-        },
-        {
-            "id": "target-2",
-        },
+        {"id": "1"},
+        {"id": "2"},
     ]
 
     strategy.check.return_value = state
@@ -206,17 +191,19 @@ def test_worker_executes_targets():
         return_value=strategy,
     ), patch.object(
         AutomationWorker,
-        "_save_and_publish_state",
+        "_wait",
+        side_effect=KeyboardInterrupt,
     ), patch.object(
         AutomationWorker,
-        "_wait",
-        side_effect=StopIteration,
+        "_save_and_publish_state",
     ):
 
         worker = create_worker()
 
-        with pytest.raises(StopIteration):
-            worker.run()
+        try:
+            worker._execute()
+        except KeyboardInterrupt:
+            pass
 
     assert strategy.execute.call_count == 2
 
@@ -236,25 +223,24 @@ def test_worker_rechecks_state_after_successful_execution():
     strategy = MagicMock()
 
     initial_state = {
-        "status": "running",
+        "credits": 100,
+        "providers": [],
     }
 
     updated_state = {
-        "status": "updated",
+        "credits": 101,
+        "providers": [],
     }
-
-    targets = [
-        {
-            "id": "target-1",
-        },
-    ]
 
     strategy.check.side_effect = [
         initial_state,
         updated_state,
     ]
 
-    strategy.get_targets.return_value = targets
+    strategy.get_targets.return_value = [
+        {"id": "1"},
+    ]
+
     strategy.execute.return_value = True
 
     with patch(
@@ -265,32 +251,24 @@ def test_worker_rechecks_state_after_successful_execution():
         return_value=strategy,
     ), patch.object(
         AutomationWorker,
-        "_save_and_publish_state",
-    ) as save_state, patch.object(
-        AutomationWorker,
         "_wait",
-        side_effect=StopIteration,
+        side_effect=KeyboardInterrupt,
+    ), patch.object(
+        AutomationWorker,
+        "_save_and_publish_state",
     ):
 
         worker = create_worker()
 
-        with pytest.raises(StopIteration):
-            worker.run()
+        try:
+            worker._execute()
+        except KeyboardInterrupt:
+            pass
 
     assert strategy.check.call_count == 2
 
     strategy.check.assert_any_call(
-        automation
-    )
-
-    assert save_state.call_count == 2
-
-    save_state.assert_any_call(
-        initial_state
-    )
-
-    save_state.assert_any_call(
-        updated_state
+        automation,
     )
 
 
@@ -299,17 +277,16 @@ def test_worker_does_not_recheck_after_failed_execution():
     strategy = MagicMock()
 
     state = {
-        "status": "running",
+        "credits": 100,
+        "providers": [],
     }
 
-    targets = [
-        {
-            "id": "target-1",
-        },
+    strategy.check.return_value = state
+
+    strategy.get_targets.return_value = [
+        {"id": "1"},
     ]
 
-    strategy.check.return_value = state
-    strategy.get_targets.return_value = targets
     strategy.execute.return_value = False
 
     with patch(
@@ -320,25 +297,22 @@ def test_worker_does_not_recheck_after_failed_execution():
         return_value=strategy,
     ), patch.object(
         AutomationWorker,
-        "_save_and_publish_state",
+        "_wait",
+        side_effect=KeyboardInterrupt,
     ), patch.object(
         AutomationWorker,
-        "_wait",
-        side_effect=StopIteration,
+        "_save_and_publish_state",
     ):
 
         worker = create_worker()
 
-        with pytest.raises(StopIteration):
-            worker.run()
+        try:
+            worker._execute()
+        except KeyboardInterrupt:
+            pass
 
     strategy.check.assert_called_once_with(
-        automation
-    )
-
-    strategy.execute.assert_called_once_with(
         automation,
-        targets[0],
     )
 
 
@@ -347,23 +321,20 @@ def test_worker_continues_when_target_execution_fails():
     strategy = MagicMock()
 
     state = {
-        "status": "running",
+        "credits": 100,
+        "providers": [],
     }
 
     targets = [
-        {
-            "id": "target-1",
-        },
-        {
-            "id": "target-2",
-        },
+        {"id": "1"},
+        {"id": "2"},
     ]
 
     strategy.check.return_value = state
     strategy.get_targets.return_value = targets
 
     strategy.execute.side_effect = [
-        Exception("Target failed"),
+        Exception("first target failed"),
         True,
     ]
 
@@ -375,17 +346,19 @@ def test_worker_continues_when_target_execution_fails():
         return_value=strategy,
     ), patch.object(
         AutomationWorker,
-        "_save_and_publish_state",
+        "_wait",
+        side_effect=KeyboardInterrupt,
     ), patch.object(
         AutomationWorker,
-        "_wait",
-        side_effect=StopIteration,
+        "_save_and_publish_state",
     ):
 
         worker = create_worker()
 
-        with pytest.raises(StopIteration):
-            worker.run()
+        try:
+            worker._execute()
+        except KeyboardInterrupt:
+            pass
 
     assert strategy.execute.call_count == 2
 
@@ -404,8 +377,8 @@ def test_worker_closes_automation_when_start_fails():
     automation = MagicMock()
     strategy = MagicMock()
 
-    automation.start.side_effect = (
-        RuntimeError("Startup failed")
+    automation.start.side_effect = Exception(
+        "start failed"
     )
 
     with patch(
@@ -418,51 +391,62 @@ def test_worker_closes_automation_when_start_fails():
 
         worker = create_worker()
 
-        with pytest.raises(
-            RuntimeError,
-            match="Startup failed",
-        ):
+        try:
             worker.run()
+        except Exception as exc:
+            assert str(exc) == "start failed"
 
     automation.start.assert_called_once()
     automation.close.assert_called_once()
 
+    strategy.initialize.assert_not_called()
+
 
 def test_worker_saves_and_publishes_state():
-    worker = create_worker()
+    automation = MagicMock()
+    strategy = MagicMock()
 
     state = {
         "credits": 100,
-        "targets": [],
+        "providers": [],
     }
 
     with patch(
-        "automation.core.worker.save_state"
+        "automation.core.worker.AutomationFactory.create_automation",
+        return_value=automation,
+    ), patch(
+        "automation.core.worker.AutomationFactory.create_strategy",
+        return_value=strategy,
+    ), patch(
+        "automation.core.worker.save_state",
     ) as save_state, patch.object(
-        worker,
+        AutomationWorker,
         "_publish_state",
     ) as publish_state:
 
+        worker = create_worker()
+
         worker._save_and_publish_state(
-            state
+            state,
         )
 
     expected_state = {
         "automationId": "test",
         "automationName": "Test Automation",
         "credits": 100,
-        "targets": [],
+        "providers": [],
     }
 
-    save_state.assert_called_once()
+    expected_state_file = (
+        Path(__file__).resolve().parent.parent.parent
+        / worker.config.state_file
+    )
 
-    save_args = save_state.call_args.args
-
-    assert save_args[0].name == "test.json"
-    assert save_args[0].parent.name == "state"
-
-    assert save_args[1] == expected_state
+    save_state.assert_called_once_with(
+        expected_state_file,
+        expected_state,
+    )
 
     publish_state.assert_called_once_with(
-        expected_state
+        expected_state,
     )

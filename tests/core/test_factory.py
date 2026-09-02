@@ -2,11 +2,8 @@ import pytest
 
 from automation.core.config import AutomationConfig
 from automation.core.factory import AutomationFactory
-from automation.core.strategy import AutomationStrategy
 from automation.types.web.automation import WebAutomation
-from automation.types.web.strategies.voting_strategy import (
-    VotingStrategy,
-)
+from automation.types.web.strategies.voting_strategy import VotingStrategy
 
 
 def create_config(
@@ -38,31 +35,33 @@ def test_create_web_automation():
     config = create_config()
 
     automation = AutomationFactory.create_automation(
-        config
+        config,
     )
 
     assert isinstance(
         automation,
         WebAutomation,
     )
-
-    assert automation.config is config
+    assert automation.config == config
 
 
 def test_create_voting_strategy():
+    config = create_config(
+        automation_type="web",
+        strategy="voting",
+    )
+
     strategy = AutomationFactory.create_strategy(
-        "web",
-        "voting",
+        config,
     )
 
     assert isinstance(
         strategy,
         VotingStrategy,
     )
-
-    assert isinstance(
-        strategy,
-        AutomationStrategy,
+    assert (
+        strategy.strategy_config.action_delay_seconds
+        == 3
     )
 
 
@@ -76,27 +75,35 @@ def test_create_automation_with_unknown_type():
         match="Unknown automation type",
     ):
         AutomationFactory.create_automation(
-            config
+            config,
         )
 
 
 def test_create_strategy_with_unknown_type():
+    config = create_config(
+        automation_type="unknown",
+        strategy="voting",
+    )
+
     with pytest.raises(
         ValueError,
         match="Unknown automation strategy",
     ):
         AutomationFactory.create_strategy(
-            "unknown",
-            "voting",
+            config,
         )
 
 
 def test_create_strategy_with_unknown_strategy():
+    config = create_config(
+        automation_type="web",
+        strategy="unknown",
+    )
+
     with pytest.raises(
         ValueError,
         match="Unknown automation strategy",
     ):
         AutomationFactory.create_strategy(
-            "web",
-            "unknown",
+            config,
         )

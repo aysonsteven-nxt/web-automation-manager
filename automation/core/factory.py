@@ -1,23 +1,20 @@
+from typing import Any, Callable
+
 from automation.core.config import AutomationConfig
 from automation.core.strategy import AutomationStrategy
 from automation.types.web.automation import WebAutomation
-from automation.types.web.strategies.voting_strategy import (
-    VotingStrategy,
-)
+from automation.types.web.strategies.config import VotingStrategyConfig
+from automation.types.web.strategies.voting_strategy import VotingStrategy
 
 
 class AutomationFactory:
-    """
-    Factory for creating automation types and strategies.
-    """
-
     _automation_types = {
         "web": WebAutomation,
     }
 
     _strategies: dict[
         tuple[str, str],
-        type[AutomationStrategy],
+        Callable[[Any], AutomationStrategy],
     ] = {
         ("web", "voting"): VotingStrategy,
     }
@@ -27,14 +24,11 @@ class AutomationFactory:
         cls,
         config: AutomationConfig,
     ):
-        automation_class = cls._automation_types.get(
-            config.type
-        )
+        automation_class = cls._automation_types.get(config.type)
 
         if automation_class is None:
             raise ValueError(
-                f"Unknown automation type: "
-                f"'{config.type}'"
+                f"Unknown automation type: '{config.type}'"
             )
 
         return automation_class(config)
@@ -42,13 +36,11 @@ class AutomationFactory:
     @classmethod
     def create_strategy(
         cls,
-        automation_type: str,
-        strategy_name: str,
+        config: AutomationConfig,
     ) -> AutomationStrategy:
-
         key = (
-            automation_type,
-            strategy_name,
+            config.type,
+            config.strategy,
         )
 
         strategy_class = cls._strategies.get(key)
@@ -56,8 +48,21 @@ class AutomationFactory:
         if strategy_class is None:
             raise ValueError(
                 f"Unknown automation strategy: "
-                f"type='{automation_type}', "
-                f"strategy='{strategy_name}'"
+                f"type='{config.type}', "
+                f"strategy='{config.strategy}'"
             )
 
-        return strategy_class()
+        if key == ("web", "voting"):
+            strategy_config = VotingStrategyConfig(
+                action_delay_seconds=config.config[
+                    "strategy"
+                ]["action_delay_seconds"]
+            )
+
+            return strategy_class(strategy_config)
+
+        raise ValueError(
+            f"Strategy configuration is not implemented: "
+            f"type='{config.type}', "
+            f"strategy='{config.strategy}'"
+        )

@@ -1,8 +1,11 @@
 import re
+
 from typing import Any
 
 from automation.core.strategy import AutomationStrategy
+
 from automation.types.web.automation import WebAutomation
+
 from automation.types.web.strategies.config import (
     VotingStrategyConfig,
 )
@@ -13,6 +16,7 @@ class VotingStrategy(AutomationStrategy):
     Generic web voting automation strategy.
 
     Handles:
+
     - Reading the current credit balance
     - Discovering vote providers
     - Determining provider availability
@@ -20,6 +24,26 @@ class VotingStrategy(AutomationStrategy):
     - Executing a vote provider action
     - Verifying the vote through the updated credit balance
     """
+
+    def __init__(
+        self,
+        config: VotingStrategyConfig,
+    ) -> None:
+        self.config = config
+
+    # ========================================================
+    # Configuration
+    # ========================================================
+
+    @property
+    def strategy_config(
+        self,
+    ) -> VotingStrategyConfig:
+        return self.config
+
+    # ========================================================
+    # Lifecycle
+    # ========================================================
 
     def initialize(
         self,
@@ -32,29 +56,14 @@ class VotingStrategy(AutomationStrategy):
                 "Web automation has not been started."
             )
 
-        self._automation = automation
-
         page.goto(
             automation.web_config.url,
             wait_until="domcontentloaded",
         )
 
-    @property
-    def strategy_config(
-        self,
-    ) -> VotingStrategyConfig:
-        if not hasattr(self, "_automation"):
-            raise RuntimeError(
-                "Voting strategy has not been initialized."
-            )
-
-        return VotingStrategyConfig(
-            action_delay_seconds=(
-                self._automation.config.config[
-                    "strategy"
-                ]["action_delay_seconds"]
-            )
-        )
+    # ========================================================
+    # Check
+    # ========================================================
 
     def check(
         self,
@@ -67,14 +76,21 @@ class VotingStrategy(AutomationStrategy):
                 "Web automation has not been started."
             )
 
-        credits = self._get_credit_balance(page)
+        credits = self._get_credit_balance(
+            page
+        )
 
-        providers = self._get_vote_providers(page)
+        providers = self._get_vote_providers(
+            page
+        )
 
         available_count = sum(
             1
             for provider in providers
-            if provider.get("available", False)
+            if provider.get(
+                "available",
+                False,
+            )
         )
 
         return {
@@ -84,15 +100,29 @@ class VotingStrategy(AutomationStrategy):
             "providers": providers,
         }
 
+    # ========================================================
+    # Targets
+    # ========================================================
+
     def get_targets(
         self,
         state: dict[str, Any],
     ) -> list[dict[str, Any]]:
         return [
             provider
-            for provider in state.get("providers", [])
-            if provider.get("available", False)
+            for provider in state.get(
+                "providers",
+                [],
+            )
+            if provider.get(
+                "available",
+                False,
+            )
         ]
+
+    # ========================================================
+    # Execute
+    # ========================================================
 
     def execute(
         self,
@@ -114,9 +144,13 @@ class VotingStrategy(AutomationStrategy):
                 "Vote provider target is missing 'id'"
             )
 
-        selector = f"#banner_{target_id} a"
+        selector = (
+            f"#banner_{target_id} a"
+        )
 
-        link = page.locator(selector).first
+        link = page.locator(
+            selector
+        ).first
 
         if link.count() == 0:
             print(
@@ -124,6 +158,7 @@ class VotingStrategy(AutomationStrategy):
                 "link not found",
                 flush=True,
             )
+
             return False
 
         if not link.is_visible():
@@ -132,9 +167,12 @@ class VotingStrategy(AutomationStrategy):
                 "link is not visible",
                 flush=True,
             )
+
             return False
 
-        href = link.get_attribute("href")
+        href = link.get_attribute(
+            "href"
+        )
 
         if not href:
             print(
@@ -142,9 +180,14 @@ class VotingStrategy(AutomationStrategy):
                 "link has no href",
                 flush=True,
             )
+
             return False
 
-        old_credits = self._get_credit_balance(page)
+        old_credits = (
+            self._get_credit_balance(
+                page
+            )
+        )
 
         print(
             f"Provider {target_id}: "
@@ -182,10 +225,11 @@ class VotingStrategy(AutomationStrategy):
         except Exception as exc:
             print(
                 f"Provider {target_id}: "
-                f"failed to open external page: "
+                "failed to open external page: "
                 f"{exc}",
                 flush=True,
             )
+
             return False
 
         finally:
@@ -207,13 +251,18 @@ class VotingStrategy(AutomationStrategy):
         except Exception as exc:
             print(
                 f"Provider {target_id}: "
-                f"failed to reload vote page: "
+                "failed to reload vote page: "
                 f"{exc}",
                 flush=True,
             )
+
             return False
 
-        new_credits = self._get_credit_balance(page)
+        new_credits = (
+            self._get_credit_balance(
+                page
+            )
+        )
 
         print(
             f"Provider {target_id}: "
@@ -227,6 +276,7 @@ class VotingStrategy(AutomationStrategy):
                 "vote verified successfully",
                 flush=True,
             )
+
             return True
 
         print(
@@ -237,10 +287,18 @@ class VotingStrategy(AutomationStrategy):
 
         return False
 
+    # ========================================================
+    # Credit Balance
+    # ========================================================
+
     @staticmethod
-    def _get_credit_balance(page) -> int:
+    def _get_credit_balance(
+        page,
+    ) -> int:
         try:
-            text = page.locator("body").inner_text()
+            text = page.locator(
+                "body"
+            ).inner_text()
 
             match = re.search(
                 r"Current Credit Balance\s+(\d+)",
@@ -249,12 +307,18 @@ class VotingStrategy(AutomationStrategy):
             )
 
             if match:
-                return int(match.group(1))
+                return int(
+                    match.group(1)
+                )
 
         except Exception:
             pass
 
         return 0
+
+    # ========================================================
+    # Cooldown
+    # ========================================================
 
     @staticmethod
     def _get_cooldown(
@@ -262,6 +326,7 @@ class VotingStrategy(AutomationStrategy):
     ) -> str | None:
         """
         Expected HTML:
+
             <tr>
                 <th>Vote in...</th>
                 <td>
@@ -269,15 +334,20 @@ class VotingStrategy(AutomationStrategy):
                 </td>
             </tr>
         """
+
         try:
-            row = banner.locator("tr").filter(
+            row = banner.locator(
+                "tr"
+            ).filter(
                 has_text="Vote in"
             ).first
 
             if row.count() == 0:
                 return None
 
-            strong = row.locator("strong").first
+            strong = row.locator(
+                "strong"
+            ).first
 
             if strong.count() == 0:
                 return None
@@ -289,12 +359,18 @@ class VotingStrategy(AutomationStrategy):
         except Exception:
             return None
 
+    # ========================================================
+    # Vote Providers
+    # ========================================================
+
     @classmethod
     def _get_vote_providers(
         cls,
         page,
     ) -> list[dict[str, Any]]:
-        providers: list[dict[str, Any]] = []
+        providers: list[
+            dict[str, Any]
+        ] = []
 
         banners = page.locator(
             '[id^="banner_"]'
@@ -307,7 +383,9 @@ class VotingStrategy(AutomationStrategy):
             return providers
 
         for index in range(count):
-            banner = banners.nth(index)
+            banner = banners.nth(
+                index
+            )
 
             try:
                 banner_id = banner.get_attribute(
@@ -328,19 +406,24 @@ class VotingStrategy(AutomationStrategy):
                     1,
                 )
 
-                link = banner.locator("a").first
+                link = banner.locator(
+                    "a"
+                ).first
 
                 if link.count() == 0:
                     providers.append(
                         {
                             "id": provider_id,
                             "available": False,
-                            "cooldown": cls._get_cooldown(
-                                banner
+                            "cooldown": (
+                                cls._get_cooldown(
+                                    banner
+                                )
                             ),
                             "href": None,
                         }
                     )
+
                     continue
 
                 href = link.get_attribute(
@@ -348,7 +431,9 @@ class VotingStrategy(AutomationStrategy):
                 )
 
                 disabled_attribute = (
-                    link.get_attribute("disabled")
+                    link.get_attribute(
+                        "disabled"
+                    )
                 )
 
                 available = (
