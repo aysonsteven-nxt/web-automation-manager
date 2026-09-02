@@ -224,3 +224,4 @@ ms-playwright/
 *_session.json
 automations.json
 available_votes.json
+/state/
