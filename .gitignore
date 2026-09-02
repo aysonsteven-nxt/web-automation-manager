@@ -218,5 +218,9 @@ __marimo__/
 .streamlit/secrets.toml
 
 
-forsaken_session.json
+# Playwright browsers
+ms-playwright/
+
+*_session.json
 automations.json
+available_votes.json
