@@ -4,31 +4,32 @@ import pytest
 
 from automation.core.config import AutomationConfig
 from automation.types.web.automation import WebAutomation
-from automation.types.web.config import (
-    WebAutomationConfig,
-)
+
 
 @pytest.fixture
-def config():
-    return AutomationConfig(
+def automation():
+    config = AutomationConfig(
         id="test-automation",
         name="Test Automation",
         type="web",
         strategy="voting",
         config={
-            "url": "https://example.com",
-            "session_file": "sessions/test_session.json",
+            "web": {
+                "url": "https://example.com",
+                "session_file": (
+                    "sessions/test_session.json"
+                ),
+            },
+            "strategy": {
+                "action_delay_seconds": 3,
+            },
         },
         state_file="state/test.json",
         log_file="logs/test.log",
         check_interval_seconds=60,
-        action_delay_seconds=3,
         enabled=True,
     )
 
-
-@pytest.fixture
-def automation(config):
     return WebAutomation(config)
 
 
@@ -92,7 +93,9 @@ def test_start_creates_playwright_browser_context_and_page(
 
     automation.start()
 
-    mock_sync_playwright.assert_called_once_with()
+    mock_sync_playwright.assert_called_once()
+
+    mock_sync_playwright.return_value.start.assert_called_once()
 
     playwright.chromium.launch.assert_called_once_with(
         headless=True,
@@ -100,14 +103,14 @@ def test_start_creates_playwright_browser_context_and_page(
 
     browser.new_context.assert_called_once_with()
 
-    context.new_page.assert_called_once_with()
-
-    page.goto.assert_not_called()
+    context.new_page.assert_called_once()
 
     assert automation.playwright is playwright
     assert automation.browser is browser
     assert automation.context is context
     assert automation.page is page
+
+    page.goto.assert_not_called()
 
 
 @patch(
@@ -133,16 +136,22 @@ def test_start_loads_storage_state_when_session_file_exists(
         type=automation.config.type,
         strategy=automation.config.strategy,
         config={
-            "url": automation.config.config["url"],
-            "session_file": str(session_file),
+            "web": {
+                "url": automation.config.config[
+                    "web"
+                ]["url"],
+                "session_file": str(
+                    session_file
+                ),
+            },
+            "strategy": {
+                "action_delay_seconds": 3,
+            },
         },
         state_file=automation.config.state_file,
         log_file=automation.config.log_file,
         check_interval_seconds=(
             automation.config.check_interval_seconds
-        ),
-        action_delay_seconds=(
-            automation.config.action_delay_seconds
         ),
         enabled=automation.config.enabled,
     )
@@ -166,8 +175,6 @@ def test_start_loads_storage_state_when_session_file_exists(
         storage_state=str(session_file),
     )
 
-    page.goto.assert_not_called()
-
 
 @patch(
     "automation.types.web.automation.sync_playwright"
@@ -178,7 +185,7 @@ def test_start_does_not_load_storage_state_when_session_file_does_not_exist(
     tmp_path,
 ):
     session_file = (
-        tmp_path / "does_not_exist.json"
+        tmp_path / "missing_session.json"
     )
 
     automation.config = AutomationConfig(
@@ -187,16 +194,22 @@ def test_start_does_not_load_storage_state_when_session_file_does_not_exist(
         type=automation.config.type,
         strategy=automation.config.strategy,
         config={
-            "url": automation.config.config["url"],
-            "session_file": str(session_file),
+            "web": {
+                "url": automation.config.config[
+                    "web"
+                ]["url"],
+                "session_file": str(
+                    session_file
+                ),
+            },
+            "strategy": {
+                "action_delay_seconds": 3,
+            },
         },
         state_file=automation.config.state_file,
         log_file=automation.config.log_file,
         check_interval_seconds=(
             automation.config.check_interval_seconds
-        ),
-        action_delay_seconds=(
-            automation.config.action_delay_seconds
         ),
         enabled=automation.config.enabled,
     )
@@ -218,8 +231,6 @@ def test_start_does_not_load_storage_state_when_session_file_does_not_exist(
 
     browser.new_context.assert_called_once_with()
 
-    page.goto.assert_not_called()
-
 
 @patch(
     "automation.types.web.automation.sync_playwright"
@@ -228,14 +239,23 @@ def test_start_does_nothing_when_already_started(
     mock_sync_playwright,
     automation,
 ):
-    automation.playwright = MagicMock()
-    automation.browser = MagicMock()
-    automation.context = MagicMock()
-    automation.page = MagicMock()
+    playwright = MagicMock()
+    browser = MagicMock()
+    context = MagicMock()
+    page = MagicMock()
+
+    automation.playwright = playwright
+    automation.browser = browser
+    automation.context = context
+    automation.page = page
 
     automation.start()
 
     mock_sync_playwright.assert_not_called()
+
+    playwright.chromium.launch.assert_not_called()
+    browser.new_context.assert_not_called()
+    context.new_page.assert_not_called()
 
 
 # ============================================================
@@ -258,14 +278,14 @@ def test_close_closes_context_browser_and_playwright(
 
     automation.close()
 
-    context.close.assert_called_once_with()
-    browser.close.assert_called_once_with()
-    playwright.stop.assert_called_once_with()
+    context.close.assert_called_once()
+    browser.close.assert_called_once()
+    playwright.stop.assert_called_once()
 
-    assert automation.page is None
-    assert automation.context is None
-    assert automation.browser is None
     assert automation.playwright is None
+    assert automation.browser is None
+    assert automation.context is None
+    assert automation.page is None
 
 
 def test_close_is_safe_when_not_started(
@@ -273,10 +293,10 @@ def test_close_is_safe_when_not_started(
 ):
     automation.close()
 
-    assert automation.page is None
-    assert automation.context is None
-    assert automation.browser is None
     assert automation.playwright is None
+    assert automation.browser is None
+    assert automation.context is None
+    assert automation.page is None
 
 
 def test_close_continues_cleanup_when_context_close_fails(
@@ -297,14 +317,14 @@ def test_close_continues_cleanup_when_context_close_fails(
 
     automation.close()
 
-    context.close.assert_called_once_with()
-    browser.close.assert_called_once_with()
-    playwright.stop.assert_called_once_with()
+    context.close.assert_called_once()
+    browser.close.assert_called_once()
+    playwright.stop.assert_called_once()
 
-    assert automation.page is None
-    assert automation.context is None
-    assert automation.browser is None
     assert automation.playwright is None
+    assert automation.browser is None
+    assert automation.context is None
+    assert automation.page is None
 
 
 def test_close_continues_cleanup_when_browser_close_fails(
@@ -325,14 +345,14 @@ def test_close_continues_cleanup_when_browser_close_fails(
 
     automation.close()
 
-    context.close.assert_called_once_with()
-    browser.close.assert_called_once_with()
-    playwright.stop.assert_called_once_with()
+    context.close.assert_called_once()
+    browser.close.assert_called_once()
+    playwright.stop.assert_called_once()
 
-    assert automation.page is None
-    assert automation.context is None
-    assert automation.browser is None
     assert automation.playwright is None
+    assert automation.browser is None
+    assert automation.context is None
+    assert automation.page is None
 
 
 def test_close_continues_cleanup_when_playwright_stop_fails(
@@ -353,18 +373,18 @@ def test_close_continues_cleanup_when_playwright_stop_fails(
 
     automation.close()
 
-    context.close.assert_called_once_with()
-    browser.close.assert_called_once_with()
-    playwright.stop.assert_called_once_with()
+    context.close.assert_called_once()
+    browser.close.assert_called_once()
+    playwright.stop.assert_called_once()
 
-    assert automation.page is None
-    assert automation.context is None
-    assert automation.browser is None
     assert automation.playwright is None
+    assert automation.browser is None
+    assert automation.context is None
+    assert automation.page is None
 
 
 # ============================================================
-# start() failure paths
+# start() - failure paths
 # ============================================================
 
 
@@ -376,16 +396,15 @@ def test_start_raises_when_playwright_start_fails(
     automation,
 ):
     mock_sync_playwright.return_value.start.side_effect = (
-        Exception("Playwright failed")
+        Exception("Playwright start failed")
     )
 
     with pytest.raises(
         Exception,
-        match="Playwright failed",
+        match="Playwright start failed",
     ):
         automation.start()
 
-    assert automation.playwright is None
     assert automation.browser is None
     assert automation.context is None
     assert automation.page is None

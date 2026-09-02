@@ -28,8 +28,8 @@ class WebAutomation(Automation):
     @property
     def web_config(self) -> WebAutomationConfig:
         return WebAutomationConfig(
-            url=self.config.config["url"],
-            session_file=self.config.config["session_file"],
+            url=self.config.config["web"]["url"],
+            session_file=self.config.config["web"]["session_file"],
         )
 
     def start(self) -> None:

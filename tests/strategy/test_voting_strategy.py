@@ -55,6 +55,47 @@ def test_initialize_navigates_to_configured_url(
 
 
 # ============================================================
+# strategy_config
+# ============================================================
+
+
+def test_strategy_config_returns_configured_values(
+    strategy,
+):
+    automation = MagicMock()
+
+    automation.page = MagicMock()
+
+    automation.config.config = {
+        "web": {
+            "url": "https://example.com/vote",
+            "session_file": "test_session.json",
+        },
+        "strategy": {
+            "action_delay_seconds": 5,
+        },
+    }
+
+    strategy.initialize(
+        automation
+    )
+
+    config = strategy.strategy_config
+
+    assert config.action_delay_seconds == 5
+
+
+def test_strategy_config_requires_initialization(
+    strategy,
+):
+    with pytest.raises(
+        RuntimeError,
+        match="Voting strategy has not been initialized",
+    ):
+        strategy.strategy_config
+
+
+# ============================================================
 # check()
 # ============================================================
 
@@ -307,7 +348,9 @@ def test_get_cooldown_returns_text(
     row = MagicMock()
     strong = MagicMock()
 
-    banner.locator.return_value.filter.return_value.first = row
+    banner.locator.return_value.filter.return_value.first = (
+        row
+    )
 
     row.count.return_value = 1
 
@@ -330,7 +373,9 @@ def test_get_cooldown_returns_none_when_row_missing(
 
     row = MagicMock()
 
-    banner.locator.return_value.filter.return_value.first = row
+    banner.locator.return_value.filter.return_value.first = (
+        row
+    )
 
     row.count.return_value = 0
 
@@ -349,7 +394,9 @@ def test_get_cooldown_returns_none_when_strong_missing(
     row = MagicMock()
     strong = MagicMock()
 
-    banner.locator.return_value.filter.return_value.first = row
+    banner.locator.return_value.filter.return_value.first = (
+        row
+    )
 
     row.count.return_value = 1
 

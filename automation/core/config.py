@@ -12,5 +12,4 @@ class AutomationConfig:
     state_file: str
     log_file: str
     check_interval_seconds: int
-    action_delay_seconds: int
     enabled: bool

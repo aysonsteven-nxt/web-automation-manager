@@ -39,13 +39,17 @@ def automation_data(
         "type": automation_type,
         "strategy": strategy,
         "config": {
-            "url": "https://example.com",
-            "session_file": "test_session.json",
+            "web": {
+                "url": "https://example.com",
+                "session_file": "test_session.json",
+            },
+            "strategy": {
+                "action_delay_seconds": 3,
+            },
         },
         "state_file": "state/test.json",
         "log_file": "logs/test.log",
         "check_interval_seconds": 60,
-        "action_delay_seconds": 3,
         "enabled": True,
     }
 
@@ -74,24 +78,35 @@ def test_load_all(tmp_path):
     assert config.strategy == "voting"
 
     assert config.config == {
-        "url": "https://example.com",
-        "session_file": "test_session.json",
+        "web": {
+            "url": "https://example.com",
+            "session_file": "test_session.json",
+        },
+        "strategy": {
+            "action_delay_seconds": 3,
+        },
     }
 
     assert (
-        config.config["url"]
+        config.config["web"]["url"]
         == "https://example.com"
     )
 
     assert (
-        config.config["session_file"]
+        config.config["web"]["session_file"]
         == "test_session.json"
+    )
+
+    assert (
+        config.config["strategy"][
+            "action_delay_seconds"
+        ]
+        == 3
     )
 
     assert config.state_file == "state/test.json"
     assert config.log_file == "logs/test.log"
     assert config.check_interval_seconds == 60
-    assert config.action_delay_seconds == 3
     assert config.enabled is True
 
 

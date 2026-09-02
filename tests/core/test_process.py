@@ -12,13 +12,17 @@ def create_config() -> AutomationConfig:
         type="web",
         strategy="voting",
         config={
-            "url": "https://example.com",
-            "session_file": "test_session.json",
+            "web": {
+                "url": "https://example.com",
+                "session_file": "test_session.json",
+            },
+            "strategy": {
+                "action_delay_seconds": 3,
+            },
         },
         state_file="state/test.json",
         log_file="logs/test.log",
         check_interval_seconds=60,
-        action_delay_seconds=3,
         enabled=True,
     )
 
