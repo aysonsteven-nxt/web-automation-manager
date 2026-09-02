@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -7,8 +8,7 @@ class AutomationConfig:
     name: str
     type: str
     strategy: str
-    url: str
-    session_file: str
+    config: dict[str, Any]
     state_file: str
     log_file: str
     check_interval_seconds: int

@@ -4,7 +4,9 @@ import pytest
 
 from automation.core.config import AutomationConfig
 from automation.types.web.automation import WebAutomation
-
+from automation.types.web.config import (
+    WebAutomationConfig,
+)
 
 @pytest.fixture
 def config():
@@ -13,8 +15,10 @@ def config():
         name="Test Automation",
         type="web",
         strategy="voting",
-        url="https://example.com",
-        session_file="sessions/test_session.json",
+        config={
+            "url": "https://example.com",
+            "session_file": "sessions/test_session.json",
+        },
         state_file="state/test.json",
         log_file="logs/test.log",
         check_interval_seconds=60,
@@ -98,10 +102,7 @@ def test_start_creates_playwright_browser_context_and_page(
 
     context.new_page.assert_called_once_with()
 
-    page.goto.assert_called_once_with(
-        automation.config.url,
-        wait_until="domcontentloaded",
-    )
+    page.goto.assert_not_called()
 
     assert automation.playwright is playwright
     assert automation.browser is browser
@@ -131,8 +132,10 @@ def test_start_loads_storage_state_when_session_file_exists(
         name=automation.config.name,
         type=automation.config.type,
         strategy=automation.config.strategy,
-        url=automation.config.url,
-        session_file=str(session_file),
+        config={
+            "url": automation.config.config["url"],
+            "session_file": str(session_file),
+        },
         state_file=automation.config.state_file,
         log_file=automation.config.log_file,
         check_interval_seconds=(
@@ -163,10 +166,7 @@ def test_start_loads_storage_state_when_session_file_exists(
         storage_state=str(session_file),
     )
 
-    page.goto.assert_called_once_with(
-        automation.config.url,
-        wait_until="domcontentloaded",
-    )
+    page.goto.assert_not_called()
 
 
 @patch(
@@ -186,8 +186,10 @@ def test_start_does_not_load_storage_state_when_session_file_does_not_exist(
         name=automation.config.name,
         type=automation.config.type,
         strategy=automation.config.strategy,
-        url=automation.config.url,
-        session_file=str(session_file),
+        config={
+            "url": automation.config.config["url"],
+            "session_file": str(session_file),
+        },
         state_file=automation.config.state_file,
         log_file=automation.config.log_file,
         check_interval_seconds=(
@@ -216,10 +218,7 @@ def test_start_does_not_load_storage_state_when_session_file_does_not_exist(
 
     browser.new_context.assert_called_once_with()
 
-    page.goto.assert_called_once_with(
-        automation.config.url,
-        wait_until="domcontentloaded",
-    )
+    page.goto.assert_not_called()
 
 
 @patch(
@@ -485,39 +484,3 @@ def test_start_raises_when_page_creation_fails(
     assert automation.browser is browser
     assert automation.context is context
     assert automation.page is None
-
-
-@patch(
-    "automation.types.web.automation.sync_playwright"
-)
-def test_start_raises_when_navigation_fails(
-    mock_sync_playwright,
-    automation,
-):
-    playwright = MagicMock()
-    browser = MagicMock()
-    context = MagicMock()
-    page = MagicMock()
-
-    mock_sync_playwright.return_value.start.return_value = (
-        playwright
-    )
-
-    playwright.chromium.launch.return_value = browser
-    browser.new_context.return_value = context
-    context.new_page.return_value = page
-
-    page.goto.side_effect = Exception(
-        "Navigation failed"
-    )
-
-    with pytest.raises(
-        Exception,
-        match="Navigation failed",
-    ):
-        automation.start()
-
-    assert automation.playwright is playwright
-    assert automation.browser is browser
-    assert automation.context is context
-    assert automation.page is page

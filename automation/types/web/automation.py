@@ -8,40 +8,32 @@ from playwright.sync_api import (
     sync_playwright,
 )
 
+from automation.core.automation import Automation
 from automation.core.config import AutomationConfig
+from automation.types.web.config import WebAutomationConfig
 
 
-class WebAutomation:
-    """
-    Web-based automation environment.
-
-    Responsible for:
-    - Starting Playwright
-    - Launching the browser
-    - Creating the browser context
-    - Loading the configured session
-    - Opening the configured URL
-    - Providing the page to the strategy
-    - Cleaning up browser resources
-    """
-
+class WebAutomation(Automation):
     def __init__(
         self,
         config: AutomationConfig,
     ):
-        self.config = config
+        super().__init__(config)
 
         self.playwright: Playwright | None = None
         self.browser: Browser | None = None
         self.context: BrowserContext | None = None
         self.page: Page | None = None
 
-    def start(self) -> None:
-        """
-        Start the Playwright browser and open the configured URL.
-        """
+    @property
+    def web_config(self) -> WebAutomationConfig:
+        return WebAutomationConfig(
+            url=self.config.config["url"],
+            session_file=self.config.config["session_file"],
+        )
 
-        if self.playwright is not None:
+    def start(self) -> None:
+        if self.is_started():
             return
 
         self.playwright = sync_playwright().start()
@@ -50,33 +42,24 @@ class WebAutomation:
             headless=True,
         )
 
-        session_file = Path(
-            self.config.session_file
-        )
-
         context_options = {}
 
+        session_file = Path(
+            self.web_config.session_file
+        )
+
         if session_file.exists():
-            context_options["storage_state"] = str(
-                session_file
+            context_options["storage_state"] = (
+                str(session_file)
             )
 
         self.context = self.browser.new_context(
-            **context_options
+            **context_options,
         )
 
         self.page = self.context.new_page()
 
-        self.page.goto(
-            self.config.url,
-            wait_until="domcontentloaded",
-        )
-
     def close(self) -> None:
-        """
-        Close the browser and Playwright resources.
-        """
-
         if self.context is not None:
             try:
                 self.context.close()

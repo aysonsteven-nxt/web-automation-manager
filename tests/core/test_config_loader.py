@@ -38,8 +38,10 @@ def automation_data(
         "name": name,
         "type": automation_type,
         "strategy": strategy,
-        "url": "https://example.com",
-        "session_file": "test_session.json",
+        "config": {
+            "url": "https://example.com",
+            "session_file": "test_session.json",
+        },
         "state_file": "state/test.json",
         "log_file": "logs/test.log",
         "check_interval_seconds": 60,
@@ -70,7 +72,26 @@ def test_load_all(tmp_path):
     assert config.name == "Test Automation"
     assert config.type == "web"
     assert config.strategy == "voting"
-    assert config.url == "https://example.com"
+
+    assert config.config == {
+        "url": "https://example.com",
+        "session_file": "test_session.json",
+    }
+
+    assert (
+        config.config["url"]
+        == "https://example.com"
+    )
+
+    assert (
+        config.config["session_file"]
+        == "test_session.json"
+    )
+
+    assert config.state_file == "state/test.json"
+    assert config.log_file == "logs/test.log"
+    assert config.check_interval_seconds == 60
+    assert config.action_delay_seconds == 3
     assert config.enabled is True
 
 
@@ -99,6 +120,7 @@ def test_load_all_multiple_automations(
     assert len(configs) == 2
 
     assert configs[0].id == "automation-1"
+
     assert configs[1].id == "automation-2"
     assert configs[1].name == "Second Automation"
 

@@ -13,6 +13,48 @@ def strategy():
 
 
 # ============================================================
+# initialize()
+# ============================================================
+
+
+def test_initialize_requires_started_automation(
+    strategy,
+):
+    automation = MagicMock()
+    automation.page = None
+
+    with pytest.raises(
+        RuntimeError,
+        match="Web automation has not been started",
+    ):
+        strategy.initialize(
+            automation
+        )
+
+
+def test_initialize_navigates_to_configured_url(
+    strategy,
+):
+    automation = MagicMock()
+
+    page = MagicMock()
+
+    automation.page = page
+    automation.web_config.url = (
+        "https://example.com/vote"
+    )
+
+    strategy.initialize(
+        automation
+    )
+
+    page.goto.assert_called_once_with(
+        "https://example.com/vote",
+        wait_until="domcontentloaded",
+    )
+
+
+# ============================================================
 # check()
 # ============================================================
 
@@ -817,6 +859,12 @@ def test_execute_returns_false_when_credit_balance_decreases(
     link.click.assert_called_once()
 
     popup.close.assert_called_once()
+
+    page.bring_to_front.assert_called_once()
+
+    page.reload.assert_called_once_with(
+        wait_until="domcontentloaded",
+    )
 
 
 # ============================================================

@@ -17,7 +17,21 @@ class VotingStrategy(AutomationStrategy):
     - Executing a vote provider action
     - Verifying the vote through the updated credit balance
     """
+    def initialize(
+        self,
+        automation: WebAutomation,
+    ) -> None:
+        page = automation.page
 
+        if page is None:
+            raise RuntimeError(
+                "Web automation has not been started."
+            )
+
+        page.goto(
+            automation.web_config.url,
+            wait_until="domcontentloaded",
+        )
     def check(
         self,
         automation: WebAutomation,

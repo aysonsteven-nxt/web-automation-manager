@@ -10,23 +10,11 @@ from automation.core.state import save_state
 
 
 class AutomationWorker:
-    """
-    Executes a configured automation.
-
-    The worker is responsible for orchestration only.
-
-    Domain-specific behavior belongs to the strategy.
-    """
-
     INTERNAL_STATE_URL = (
-        "http://127.0.0.1:8000"
-        "/api/internal/automation/state"
+        "http://127.0.0.1:8000/api/internal/automation/state"
     )
 
-    def __init__(
-        self,
-        config: AutomationConfig,
-    ):
+    def __init__(self, config: AutomationConfig):
         self.config = config
 
         self.automation = (
@@ -44,20 +32,22 @@ class AutomationWorker:
 
     def run(self) -> None:
         print(
-            f"Starting automation: "
-            f"{self.config.name}",
+            f"Starting automation: {self.config.name}",
             flush=True,
         )
 
         try:
             self.automation.start()
 
+            self.strategy.initialize(
+                self.automation
+            )
+
             self._execute()
 
         except Exception as exc:
             print(
-                f"Automation '{self.config.id}' "
-                f"failed: {exc}",
+                f"Automation '{self.config.id}' failed: {exc}",
                 flush=True,
             )
             raise
@@ -66,15 +56,12 @@ class AutomationWorker:
             self.automation.close()
 
             print(
-                f"Automation stopped: "
-                f"{self.config.name}",
+                f"Automation stopped: {self.config.name}",
                 flush=True,
             )
 
     def _execute(self) -> None:
-
         while True:
-
             state = self.strategy.check(
                 self.automation
             )
@@ -88,7 +75,6 @@ class AutomationWorker:
             )
 
             for target in targets:
-
                 try:
                     success = self.strategy.execute(
                         self.automation,
@@ -97,11 +83,9 @@ class AutomationWorker:
 
                     if success:
                         print(
-                            f"Automation "
-                            f"'{self.config.id}': "
-                            f"target "
-                            f"{target.get('id')} "
-                            f"executed successfully.",
+                            f"Automation '{self.config.id}': "
+                            f"target {target.get('id')} "
+                            "executed successfully.",
                             flush=True,
                         )
 
@@ -115,20 +99,16 @@ class AutomationWorker:
 
                     else:
                         print(
-                            f"Automation "
-                            f"'{self.config.id}': "
-                            f"target "
-                            f"{target.get('id')} "
-                            f"execution failed.",
+                            f"Automation '{self.config.id}': "
+                            f"target {target.get('id')} "
+                            "execution failed.",
                             flush=True,
                         )
 
                 except Exception as exc:
                     print(
-                        f"Automation "
-                        f"'{self.config.id}': "
-                        f"target "
-                        f"{target.get('id')} "
+                        f"Automation '{self.config.id}': "
+                        f"target {target.get('id')} "
                         f"failed: {exc}",
                         flush=True,
                     )
@@ -144,7 +124,6 @@ class AutomationWorker:
         self,
         state: dict[str, Any],
     ) -> None:
-
         state = {
             "automationId": self.config.id,
             "automationName": self.config.name,
@@ -169,7 +148,6 @@ class AutomationWorker:
         self,
         state: dict[str, Any],
     ) -> None:
-
         try:
             response = requests.post(
                 self.INTERNAL_STATE_URL,
@@ -181,7 +159,6 @@ class AutomationWorker:
 
         except Exception as exc:
             print(
-                f"Failed to publish automation state: "
-                f"{exc}",
+                f"Failed to publish automation state: {exc}",
                 flush=True,
             )

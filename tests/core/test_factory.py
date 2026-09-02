@@ -10,16 +10,18 @@ from automation.types.web.strategies.voting_strategy import (
 
 
 def create_config(
-    automation_type: str = "web",
-    strategy: str = "voting",
+    automation_type="web",
+    strategy="voting",
 ) -> AutomationConfig:
     return AutomationConfig(
         id="test",
         name="Test Automation",
         type=automation_type,
         strategy=strategy,
-        url="https://example.com",
-        session_file="test_session.json",
+        config={
+            "url": "https://example.com",
+            "session_file": "test_session.json",
+        },
         state_file="state/test.json",
         log_file="logs/test.log",
         check_interval_seconds=60,

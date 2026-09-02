@@ -49,7 +49,7 @@ def automation_list():
                 "name": process.config.name,
                 "type": process.config.type,
                 "strategy": process.config.strategy,
-                "url": process.config.url,
+                "url": process.config.config.get("url"),
                 "enabled": process.config.enabled,
                 "status": status,
             }

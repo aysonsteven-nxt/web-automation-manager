@@ -15,8 +15,10 @@ def create_config(
         name="Test Automation",
         type="web",
         strategy="voting",
-        url="https://example.com",
-        session_file="sessions/test.json",
+        config={
+            "url": "https://example.com",
+            "session_file": "sessions/test.json",
+        },
         state_file="state/test.json",
         log_file="logs/test.log",
         check_interval_seconds=60,

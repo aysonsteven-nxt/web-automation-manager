@@ -40,7 +40,9 @@ def test_automation_list(
     process.config.name = "Test Automation"
     process.config.type = "web"
     process.config.strategy = "voting"
-    process.config.url = "https://example.com"
+    process.config.config = {
+        "url": "https://example.com",
+    }
     process.config.enabled = True
 
     process.status.return_value = {

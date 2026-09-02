@@ -5,10 +5,11 @@ from typing import Any
 class AutomationStrategy(ABC):
 
     @abstractmethod
-    def check(
-        self,
-        automation,
-    ) -> dict[str, Any]:
+    def initialize(self, automation) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def check(self, automation) -> dict[str, Any]:
         raise NotImplementedError
 
     @abstractmethod
