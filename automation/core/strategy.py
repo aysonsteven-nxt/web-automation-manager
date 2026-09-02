@@ -12,6 +12,13 @@ class AutomationStrategy(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def get_targets(
+        self,
+        state: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
+    @abstractmethod
     def execute(
         self,
         automation,

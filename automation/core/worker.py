@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 from typing import Any
 
@@ -6,19 +7,13 @@ import requests
 from automation.core.config import AutomationConfig
 from automation.core.factory import AutomationFactory
 from automation.core.state import save_state
-from automation.types.web.automation import WebAutomation
 
 
 class AutomationWorker:
     """
     Executes a configured automation.
 
-    The worker is responsible for:
-    - Creating the automation strategy
-    - Creating the automation type
-    - Running the automation lifecycle
-    - Saving automation state
-    - Publishing automation state
+    The worker is responsible for orchestration only.
 
     Domain-specific behavior belongs to the strategy.
     """
@@ -33,18 +28,21 @@ class AutomationWorker:
         config: AutomationConfig,
     ):
         self.config = config
-        self.strategy = AutomationFactory.create_strategy(
-            config.type,
-            config.strategy,
+
+        self.automation = (
+            AutomationFactory.create_automation(
+                config
+            )
         )
 
-        self.automation = None
+        self.strategy = (
+            AutomationFactory.create_strategy(
+                config.type,
+                config.strategy,
+            )
+        )
 
     def run(self) -> None:
-        """
-        Start and execute the automation.
-        """
-
         print(
             f"Starting automation: "
             f"{self.config.name}",
@@ -52,8 +50,6 @@ class AutomationWorker:
         )
 
         try:
-            self.automation = self._create_automation()
-
             self.automation.start()
 
             self._execute()
@@ -67,8 +63,7 @@ class AutomationWorker:
             raise
 
         finally:
-            if self.automation is not None:
-                self.automation.close()
+            self.automation.close()
 
             print(
                 f"Automation stopped: "
@@ -76,50 +71,10 @@ class AutomationWorker:
                 flush=True,
             )
 
-    def _create_automation(self):
-        """
-        Create the concrete automation type.
-
-        Currently supported:
-        - web
-        """
-
-        if self.config.type == "web":
-            return WebAutomation(
-                self.config
-            )
-
-        raise ValueError(
-            f"Unsupported automation type: "
-            f"'{self.config.type}'"
-        )
-
     def _execute(self) -> None:
-        """
-        Execute the strategy and periodically check
-        the automation state.
-        """
-
-        if self.automation is None:
-            raise RuntimeError(
-                "Automation has not been started."
-            )
-
-        state = self.strategy.check(
-            self.automation
-        )
-
-        self._save_and_publish_state(
-            state
-        )
-
-        print(
-            f"Automation '{self.config.id}' "
-            f"state checked.",
-            flush=True,
-        )
 
         while True:
+
             state = self.strategy.check(
                 self.automation
             )
@@ -128,19 +83,12 @@ class AutomationWorker:
                 state
             )
 
-            targets = [
-                target
-                for target in state.get(
-                    "providers",
-                    [],
-                )
-                if target.get(
-                    "available",
-                    False,
-                )
-            ]
+            targets = self.strategy.get_targets(
+                state
+            )
 
             for target in targets:
+
                 try:
                     success = self.strategy.execute(
                         self.automation,
@@ -151,7 +99,8 @@ class AutomationWorker:
                         print(
                             f"Automation "
                             f"'{self.config.id}': "
-                            f"target {target.get('id')} "
+                            f"target "
+                            f"{target.get('id')} "
                             f"executed successfully.",
                             flush=True,
                         )
@@ -168,7 +117,8 @@ class AutomationWorker:
                         print(
                             f"Automation "
                             f"'{self.config.id}': "
-                            f"target {target.get('id')} "
+                            f"target "
+                            f"{target.get('id')} "
                             f"execution failed.",
                             flush=True,
                         )
@@ -177,7 +127,8 @@ class AutomationWorker:
                     print(
                         f"Automation "
                         f"'{self.config.id}': "
-                        f"target {target.get('id')} "
+                        f"target "
+                        f"{target.get('id')} "
                         f"failed: {exc}",
                         flush=True,
                     )
@@ -185,8 +136,6 @@ class AutomationWorker:
             self._wait()
 
     def _wait(self) -> None:
-        import time
-
         time.sleep(
             self.config.check_interval_seconds
         )
@@ -195,6 +144,7 @@ class AutomationWorker:
         self,
         state: dict[str, Any],
     ) -> None:
+
         state = {
             "automationId": self.config.id,
             "automationName": self.config.name,
@@ -219,6 +169,7 @@ class AutomationWorker:
         self,
         state: dict[str, Any],
     ) -> None:
+
         try:
             response = requests.post(
                 self.INTERNAL_STATE_URL,
