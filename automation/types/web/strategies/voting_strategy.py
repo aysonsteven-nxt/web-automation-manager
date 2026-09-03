@@ -1,11 +1,8 @@
 import re
-
 from typing import Any
 
 from automation.core.strategy import AutomationStrategy
-
 from automation.types.web.automation import WebAutomation
-
 from automation.types.web.strategies.config import (
     VotingStrategyConfig,
 )
@@ -16,7 +13,6 @@ class VotingStrategy(AutomationStrategy):
     Generic web voting automation strategy.
 
     Handles:
-
     - Reading the current credit balance
     - Discovering vote providers
     - Determining provider availability
@@ -61,6 +57,8 @@ class VotingStrategy(AutomationStrategy):
             wait_until="domcontentloaded",
         )
 
+        self._wait_for_vote_page(page)
+
     # ========================================================
     # Check
     # ========================================================
@@ -75,6 +73,11 @@ class VotingStrategy(AutomationStrategy):
             raise RuntimeError(
                 "Web automation has not been started."
             )
+
+        # Always refresh the voting page before reading its
+        # state. This prevents stale provider/cooldown data
+        # from remaining in the long-running browser page.
+        self._refresh_vote_page(page)
 
         credits = self._get_credit_balance(
             page
@@ -158,7 +161,6 @@ class VotingStrategy(AutomationStrategy):
                 "link not found",
                 flush=True,
             )
-
             return False
 
         if not link.is_visible():
@@ -167,7 +169,6 @@ class VotingStrategy(AutomationStrategy):
                 "link is not visible",
                 flush=True,
             )
-
             return False
 
         href = link.get_attribute(
@@ -180,7 +181,6 @@ class VotingStrategy(AutomationStrategy):
                 "link has no href",
                 flush=True,
             )
-
             return False
 
         old_credits = (
@@ -229,7 +229,6 @@ class VotingStrategy(AutomationStrategy):
                 f"{exc}",
                 flush=True,
             )
-
             return False
 
         finally:
@@ -248,6 +247,11 @@ class VotingStrategy(AutomationStrategy):
             page.reload(
                 wait_until="domcontentloaded",
             )
+
+            self._wait_for_vote_page(
+                page
+            )
+
         except Exception as exc:
             print(
                 f"Provider {target_id}: "
@@ -255,7 +259,6 @@ class VotingStrategy(AutomationStrategy):
                 f"{exc}",
                 flush=True,
             )
-
             return False
 
         new_credits = (
@@ -276,7 +279,6 @@ class VotingStrategy(AutomationStrategy):
                 "vote verified successfully",
                 flush=True,
             )
-
             return True
 
         print(
@@ -286,6 +288,56 @@ class VotingStrategy(AutomationStrategy):
         )
 
         return False
+
+    # ========================================================
+    # Page Refresh
+    # ========================================================
+
+    @staticmethod
+    def _refresh_vote_page(
+        page,
+    ) -> None:
+        """
+        Reload the voting page before every state check.
+
+        The worker is long-running, so relying on the existing
+        DOM can result in stale cooldown/provider information.
+        """
+
+        try:
+            page.reload(
+                wait_until="domcontentloaded",
+            )
+
+            VotingStrategy._wait_for_vote_page(
+                page
+            )
+
+        except Exception as exc:
+            raise RuntimeError(
+                "Failed to refresh voting page: "
+                f"{exc}"
+            ) from exc
+
+    @staticmethod
+    def _wait_for_vote_page(
+        page,
+    ) -> None:
+        """
+        Wait until the voting provider containers exist.
+
+        domcontentloaded only guarantees that the document has
+        been parsed. The provider elements may still be loading.
+        """
+
+        banners = page.locator(
+            '[id^="banner_"]'
+        )
+
+        banners.first.wait_for(
+            state="attached",
+            timeout=15000,
+        )
 
     # ========================================================
     # Credit Balance
