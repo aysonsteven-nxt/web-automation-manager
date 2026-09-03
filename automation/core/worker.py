@@ -1,4 +1,5 @@
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +15,10 @@ class AutomationWorker:
         "http://127.0.0.1:8000/api/internal/automation/state"
     )
 
-    def __init__(self, config: AutomationConfig):
+    def __init__(
+        self,
+        config: AutomationConfig,
+    ):
         self.config = config
 
         self.automation = (
@@ -124,6 +128,9 @@ class AutomationWorker:
         state = {
             "automationId": self.config.id,
             "automationName": self.config.name,
+            "lastCheckDateTime": datetime.now(
+                timezone.utc
+            ).isoformat(),
             **state,
         }
 
