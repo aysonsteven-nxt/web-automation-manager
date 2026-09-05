@@ -63,9 +63,20 @@ class AutomationWorker:
 
     def _execute(self) -> None:
         while True:
-            state = self.strategy.check(
-                self.automation
-            )
+            try:
+                state = self.strategy.check(
+                    self.automation
+                )
+
+            except Exception as exc:
+                print(
+                    f"Automation '{self.config.id}': "
+                    f"state check failed: {exc}",
+                    flush=True,
+                )
+
+                self._wait()
+                continue
 
             self._save_and_publish_state(
                 state

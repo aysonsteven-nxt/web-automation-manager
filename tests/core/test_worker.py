@@ -1,5 +1,5 @@
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 from automation.core.config import AutomationConfig
 from automation.core.worker import AutomationWorker
@@ -123,6 +123,49 @@ def test_worker_checks_strategy():
 
     strategy.check.assert_called_once_with(
         automation,
+    )
+
+
+def test_worker_retries_after_state_check_failure():
+    automation = MagicMock()
+    strategy = MagicMock()
+
+    state = {
+        "credits": 100,
+        "providers": [],
+    }
+
+    strategy.check.side_effect = [
+        RuntimeError("temporary page failure"),
+        state,
+    ]
+    strategy.get_targets.return_value = []
+
+    with patch(
+        "automation.core.worker.AutomationFactory.create_automation",
+        return_value=automation,
+    ), patch(
+        "automation.core.worker.AutomationFactory.create_strategy",
+        return_value=strategy,
+    ), patch.object(
+        AutomationWorker,
+        "_wait",
+        side_effect=[None, KeyboardInterrupt],
+    ), patch.object(
+        AutomationWorker,
+        "_save_and_publish_state",
+    ):
+
+        worker = create_worker()
+
+        try:
+            worker._execute()
+        except KeyboardInterrupt:
+            pass
+
+    assert strategy.check.call_count == 2
+    strategy.get_targets.assert_called_once_with(
+        state,
     )
 
 
@@ -433,6 +476,7 @@ def test_worker_saves_and_publishes_state():
     expected_state = {
         "automationId": "test",
         "automationName": "Test Automation",
+        "lastCheckDateTime": ANY,
         "credits": 100,
         "providers": [],
     }
