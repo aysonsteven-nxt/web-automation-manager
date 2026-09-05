@@ -57,6 +57,7 @@ class VotingStrategy(AutomationStrategy):
             wait_until="domcontentloaded",
         )
 
+        self._ensure_authenticated(page)
         self._wait_for_vote_page(page)
 
     # ========================================================
@@ -309,6 +310,7 @@ class VotingStrategy(AutomationStrategy):
                 wait_until="domcontentloaded",
             )
 
+            VotingStrategy._ensure_authenticated(page)
             VotingStrategy._wait_for_vote_page(
                 page
             )
@@ -318,6 +320,28 @@ class VotingStrategy(AutomationStrategy):
                 "Failed to refresh voting page: "
                 f"{exc}"
             ) from exc
+
+    @staticmethod
+    def _ensure_authenticated(page) -> None:
+        url = str(page.url).lower()
+
+        if "action=login" in url:
+            raise RuntimeError(
+                "Web session is not authenticated. "
+                "Run session_manager.py to create a new session."
+            )
+
+        try:
+            text = page.locator("body").inner_text().lower()
+
+        except Exception:
+            return
+
+        if "please log-in to vote" in text:
+            raise RuntimeError(
+                "Web session is not authenticated. "
+                "Run session_manager.py to create a new session."
+            )
 
     @staticmethod
     def _wait_for_vote_page(

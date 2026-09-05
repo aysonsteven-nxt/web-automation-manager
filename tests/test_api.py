@@ -612,6 +612,10 @@ def test_automation_state_returns_state(
         "state/test.json"
     )
 
+    process.status.return_value = {
+        "running": True,
+    }
+
     mock_manager.get.return_value = process
 
     expected_state = {
@@ -636,6 +640,30 @@ def test_automation_state_returns_state(
     )
 
     mock_load_state.assert_called_once()
+
+
+@patch("api.load_state")
+@patch("api.automation_manager")
+def test_automation_state_returns_worker_inactive(
+    mock_manager,
+    mock_load_state,
+):
+    process = MagicMock()
+    process.status.return_value = {
+        "running": False,
+    }
+    mock_manager.get.return_value = process
+
+    response = client.get(
+        "/api/automations/test-automation/state"
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": "Worker is not active.",
+    }
+
+    mock_load_state.assert_not_called()
 
 
 @patch("api.load_state")

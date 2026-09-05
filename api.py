@@ -249,6 +249,15 @@ def automation_state(
             automation_id
         )
 
+        if not process.status().get(
+            "running",
+            False,
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Worker is not active.",
+            )
+
         state_file = (
             Path(__file__).resolve().parent
             / process.config.state_file

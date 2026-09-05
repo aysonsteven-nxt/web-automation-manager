@@ -62,6 +62,39 @@ def test_initialize_navigates_to_configured_url(
     )
 
 
+def test_initialize_rejects_expired_session(
+    strategy,
+    automation,
+):
+    page = MagicMock()
+    page.url = (
+        "https://example.com/?module=account&action=login"
+    )
+    automation.page = page
+
+    with pytest.raises(
+        RuntimeError,
+        match="Web session is not authenticated",
+    ):
+        strategy.initialize(
+            automation,
+        )
+
+
+def test_authentication_check_rejects_login_page():
+    page = MagicMock()
+    page.url = "https://example.com/?module=vote"
+    page.locator.return_value.inner_text.return_value = (
+        "Please log-in to vote!"
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Run session_manager.py",
+    ):
+        VotingStrategy._ensure_authenticated(page)
+
+
 def test_strategy_config_returns_configured_values(
     strategy,
 ):
