@@ -65,6 +65,97 @@ def write_audit_event(
         )
 
 
+def _parse_expiration(value: Any) -> datetime | None:
+    if value is None or value == "":
+        return None
+
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(
+                value.replace("Z", "+00:00")
+            ).astimezone(timezone.utc)
+        except ValueError:
+            return None
+
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc)
+
+    return None
+
+
+def _load_token_metadata() -> dict[str, dict[str, Any]]:
+    token_map: dict[str, dict[str, Any]] = {}
+
+    configured_token = os.getenv("AUTOMATION_API_TOKEN", "").strip()
+    if configured_token:
+        token_map[configured_token] = {
+            "token": configured_token,
+            "role": "admin",
+            "principal": "local-service",
+            "scopes": [],
+            "expires_at": None,
+            "revoked": False,
+        }
+
+    tokens_json = os.getenv("AUTOMATION_API_TOKENS", "")
+    if not tokens_json.strip():
+        return token_map
+
+    try:
+        entries = json.loads(tokens_json)
+    except json.JSONDecodeError:
+        return token_map
+
+    if isinstance(entries, dict):
+        for token_value, entry in entries.items():
+            if not isinstance(entry, dict):
+                continue
+
+            token_key = str(token_value).strip()
+            if not token_key:
+                continue
+
+            token_map[token_key] = {
+                "token": token_key,
+                "role": str(entry.get("role", "admin")).strip().lower(),
+                "principal": str(entry.get("principal", "default")).strip(),
+                "scopes": [
+                    str(item).strip()
+                    for item in entry.get("scopes", [])
+                    if str(item).strip()
+                ],
+                "expires_at": _parse_expiration(entry.get("expires_at")),
+                "revoked": bool(entry.get("revoked", False)),
+            }
+        return token_map
+
+    if not isinstance(entries, list):
+        return token_map
+
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+
+        token_value = str(entry.get("token", "")).strip()
+        if not token_value:
+            continue
+
+        token_map[token_value] = {
+            "token": token_value,
+            "role": str(entry.get("role", "admin")).strip().lower(),
+            "principal": str(entry.get("principal", "default")).strip(),
+            "scopes": [
+                str(item).strip()
+                for item in entry.get("scopes", [])
+                if str(item).strip()
+            ],
+            "expires_at": _parse_expiration(entry.get("expires_at")),
+            "revoked": bool(entry.get("revoked", False)),
+        }
+
+    return token_map
+
+
 def require_api_token(
     api_token: str | None = Header(
         default=None,
@@ -83,20 +174,7 @@ def require_api_token(
         alias="X-API-Scopes",
     ),
 ) -> dict[str, Any]:
-    configured_token = os.getenv(
-        "AUTOMATION_API_TOKEN"
-    )
-
-    if not configured_token:
-        raise HTTPException(
-            status_code=503,
-            detail="API authentication is not configured.",
-        )
-
-    if api_token is None or not secrets.compare_digest(
-        api_token,
-        configured_token,
-    ):
+    if api_token is None:
         raise HTTPException(
             status_code=401,
             detail="Invalid or missing API token.",
@@ -105,15 +183,45 @@ def require_api_token(
             },
         )
 
-    role_name = (api_role or "admin").strip().lower()
+    token_map = _load_token_metadata()
+    if not token_map:
+        raise HTTPException(
+            status_code=503,
+            detail="API authentication is not configured.",
+        )
 
+    token_entry = token_map.get(api_token)
+    if token_entry is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or missing API token.",
+            headers={
+                "WWW-Authenticate": "API token",
+            },
+        )
+
+    if token_entry.get("revoked"):
+        raise HTTPException(
+            status_code=401,
+            detail="API token has been revoked.",
+        )
+
+    expires_at = token_entry.get("expires_at")
+    if expires_at is not None and datetime.now(timezone.utc) >= expires_at:
+        raise HTTPException(
+            status_code=401,
+            detail="API token has expired.",
+        )
+
+    role_name = (api_role or token_entry.get("role") or "admin").strip().lower()
     if role_name not in VALID_API_ROLES:
         raise HTTPException(
             status_code=401,
             detail="Invalid API role.",
         )
 
-    principal_name = (api_principal or "default").strip()
+    principal_name = (api_principal or token_entry.get("principal") or "default").strip()
+    token_scopes = list(token_entry.get("scopes") or [])
     scope_values: list[str] = []
 
     if api_scopes:
@@ -122,6 +230,8 @@ def require_api_token(
             for item in api_scopes.split(",")
             if item.strip()
         ]
+    else:
+        scope_values = token_scopes
 
     return {
         "role": role_name,

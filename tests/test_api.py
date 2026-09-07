@@ -1,3 +1,4 @@
+import json
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -66,6 +67,74 @@ def test_protected_endpoint_rejects_invalid_token():
     )
 
     assert response.status_code == 401
+
+
+def test_expired_token_is_rejected(monkeypatch):
+    monkeypatch.setenv(
+        "AUTOMATION_API_TOKEN",
+        "",
+    )
+    monkeypatch.setenv(
+        "AUTOMATION_API_TOKENS",
+        json.dumps([
+            {
+                "token": "expired-token",
+                "role": "viewer",
+                "principal": "expired-user",
+                "scopes": [],
+                "expires_at": "2000-01-01T00:00:00Z",
+                "revoked": False,
+            }
+        ]),
+    )
+
+    response = unauthenticated_client.get(
+        "/api/automations",
+        headers={
+            "X-API-Token": "expired-token",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "detail": "API token has expired."
+    }
+
+
+def test_revoked_token_from_registry_is_rejected(monkeypatch):
+    monkeypatch.setenv(
+        "AUTOMATION_API_TOKEN",
+        "",
+    )
+    monkeypatch.setenv(
+        "AUTOMATION_API_TOKENS",
+        json.dumps({
+            "revoked-token": {
+                "role": "viewer",
+                "principal": "revoked-user",
+                "scopes": [],
+                "revoked": True,
+            },
+            "active-token": {
+                "role": "viewer",
+                "principal": "active-user",
+                "scopes": [],
+                "revoked": False,
+            }
+        }),
+    )
+
+    response = unauthenticated_client.get(
+        "/api/automations",
+        headers={
+            "X-API-Token": "revoked-token",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "detail": "API token has been revoked."
+    }
 
 
 def test_protected_endpoint_allows_viewer_role_for_read_access():
