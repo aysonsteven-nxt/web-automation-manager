@@ -517,6 +517,7 @@ def test_worker_publishes_state_with_api_token(
         json=state,
         headers={
             "X-API-Token": "test-api-token",
+            "X-API-Role": "service",
         },
         timeout=5,
     )

@@ -68,6 +68,103 @@ def test_protected_endpoint_rejects_invalid_token():
     assert response.status_code == 401
 
 
+def test_protected_endpoint_allows_viewer_role_for_read_access():
+    response = unauthenticated_client.get(
+        "/api/automations",
+        headers={
+            "X-API-Token": "test-api-token",
+            "X-API-Role": "viewer",
+        },
+    )
+
+    assert response.status_code == 200
+
+
+def test_start_automation_rejects_viewer_role(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "api.AUDIT_LOG_PATH",
+        tmp_path / "audit.log",
+    )
+
+    response = unauthenticated_client.post(
+        "/api/automations/test-automation/start",
+        headers={
+            "X-API-Token": "test-api-token",
+            "X-API-Role": "viewer",
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "Insufficient privileges."
+    }
+
+    audit_log = (tmp_path / "audit.log").read_text(
+        encoding="utf-8"
+    )
+    assert '"category": "authorization"' in audit_log
+    assert '"status": "denied"' in audit_log
+
+
+def test_internal_state_endpoint_requires_service_role():
+    response = unauthenticated_client.post(
+        "/api/internal/automation/state",
+        json={
+            "automationId": "test-automation",
+        },
+        headers={
+            "X-API-Token": "test-api-token",
+            "X-API-Role": "viewer",
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "Insufficient privileges."
+    }
+
+
+def test_operator_must_have_scope_for_automation_action():
+    response = unauthenticated_client.post(
+        "/api/automations/test-automation/start",
+        headers={
+            "X-API-Token": "test-api-token",
+            "X-API-Role": "operator",
+            "X-API-Principal": "operator-alpha",
+            "X-API-Scopes": "automation:other-automation",
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "Insufficient privileges for this automation."
+    }
+
+
+@patch("api.automation_manager")
+def test_operator_with_matching_scope_can_start_automation(
+    mock_manager,
+):
+    mock_manager.start.return_value = True
+    mock_manager.status.return_value = {
+        "running": True,
+        "pid": 1234,
+        "returncode": None,
+    }
+
+    response = unauthenticated_client.post(
+        "/api/automations/test-automation/start",
+        headers={
+            "X-API-Token": "test-api-token",
+            "X-API-Role": "operator",
+            "X-API-Principal": "operator-alpha",
+            "X-API-Scopes": "automation:test-automation",
+        },
+    )
+
+    assert response.status_code == 200
+
+
 # ============================================================
 # GET /api/automations
 # ============================================================
@@ -751,6 +848,42 @@ def test_automation_state_returns_404_for_unknown_automation(
     assert response.status_code == 404
 
 
+@patch("api.automation_manager")
+def test_start_automation_logs_successful_admin_action(
+    mock_manager,
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(
+        "api.AUDIT_LOG_PATH",
+        tmp_path / "audit.log",
+    )
+
+    mock_manager.start.return_value = True
+    mock_manager.status.return_value = {
+        "running": True,
+        "pid": 1234,
+        "returncode": None,
+    }
+
+    response = client.post(
+        "/api/automations/test-automation/start",
+        headers={
+            "X-API-Role": "admin",
+            "X-API-Principal": "admin-user",
+            "X-API-Scopes": "automation:test-automation",
+        },
+    )
+
+    assert response.status_code == 200
+
+    audit_log = (tmp_path / "audit.log").read_text(
+        encoding="utf-8"
+    )
+    assert '"action": "automation.start"' in audit_log
+    assert '"status": "success"' in audit_log
+
+
 # ============================================================
 # POST /api/internal/automation/state
 # ============================================================
@@ -770,6 +903,9 @@ def test_automation_state_update(
     response = client.post(
         "/api/internal/automation/state",
         json=state,
+        headers={
+            "X-API-Role": "service",
+        },
     )
 
     assert response.status_code == 200
