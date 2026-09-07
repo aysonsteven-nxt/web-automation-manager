@@ -1,5 +1,5 @@
 import json
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from urllib.parse import urlparse
 
 from automation.core.config import AutomationConfig
@@ -35,7 +35,13 @@ class AutomationConfigLoader:
                 )
 
             path = Path(path_value)
-            if path.is_absolute() or ".." in path.parts:
+            windows_path = PureWindowsPath(path_value)
+            if (
+                path.is_absolute()
+                or windows_path.is_absolute()
+                or ".." in path.parts
+                or ".." in windows_path.parts
+            ):
                 raise ValueError(
                     f"Automation {field_name} must stay within the project."
                 )
