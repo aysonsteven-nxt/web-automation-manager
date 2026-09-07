@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Request
 
 VALID_API_ROLES = {
     "admin",
@@ -14,11 +14,49 @@ VALID_API_ROLES = {
     "service",
 }
 
+FAILED_AUTH_ATTEMPTS: dict[str, list[float]] = {}
+FAILED_AUTH_WINDOW_SECONDS = 60.0
+FAILED_AUTH_LIMIT = 5
+
 AUDIT_LOG_PATH = (
     Path(__file__).resolve().parents[2]
     / "logs"
     / "security_audit.log"
 )
+
+
+def _register_failed_auth(request: Request | None = None) -> None:
+    if request is None:
+        return
+
+    client_key = "unknown"
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        client_key = forwarded_for.split(",")[0].strip()
+    elif request.client is not None:
+        client_key = request.client.host
+
+    attempts = FAILED_AUTH_ATTEMPTS.setdefault(client_key, [])
+    attempts.append(datetime.now(timezone.utc).timestamp())
+    cutoff = datetime.now(timezone.utc).timestamp() - FAILED_AUTH_WINDOW_SECONDS
+    FAILED_AUTH_ATTEMPTS[client_key] = [
+        ts for ts in attempts if ts >= cutoff
+    ]
+
+    if len(FAILED_AUTH_ATTEMPTS[client_key]) >= FAILED_AUTH_LIMIT:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many failed authentication attempts. Please retry later.",
+        )
+
+
+def _client_key_for_request(request: Request) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    if request.client is not None:
+        return request.client.host
+    return "unknown"
 
 
 def write_audit_event(
@@ -157,6 +195,7 @@ def _load_token_metadata() -> dict[str, dict[str, Any]]:
 
 
 def require_api_token(
+    request: Request,
     api_token: str | None = Header(
         default=None,
         alias="X-API-Token",
@@ -175,6 +214,8 @@ def require_api_token(
     ),
 ) -> dict[str, Any]:
     if api_token is None:
+        if request is not None:
+            _register_failed_auth(request)
         raise HTTPException(
             status_code=401,
             detail="Invalid or missing API token.",
@@ -185,6 +226,8 @@ def require_api_token(
 
     token_map = _load_token_metadata()
     if not token_map:
+        if request is not None:
+            _register_failed_auth(request)
         raise HTTPException(
             status_code=503,
             detail="API authentication is not configured.",
@@ -192,6 +235,7 @@ def require_api_token(
 
     token_entry = token_map.get(api_token)
     if token_entry is None:
+        _register_failed_auth(request)
         raise HTTPException(
             status_code=401,
             detail="Invalid or missing API token.",
@@ -201,6 +245,7 @@ def require_api_token(
         )
 
     if token_entry.get("revoked"):
+        FAILED_AUTH_ATTEMPTS.pop(_client_key_for_request(request), None)
         raise HTTPException(
             status_code=401,
             detail="API token has been revoked.",
@@ -208,6 +253,7 @@ def require_api_token(
 
     expires_at = token_entry.get("expires_at")
     if expires_at is not None and datetime.now(timezone.utc) >= expires_at:
+        FAILED_AUTH_ATTEMPTS.pop(_client_key_for_request(request), None)
         raise HTTPException(
             status_code=401,
             detail="API token has expired.",
@@ -215,6 +261,7 @@ def require_api_token(
 
     role_name = (api_role or token_entry.get("role") or "admin").strip().lower()
     if role_name not in VALID_API_ROLES:
+        _register_failed_auth(request)
         raise HTTPException(
             status_code=401,
             detail="Invalid API role.",
@@ -232,6 +279,8 @@ def require_api_token(
         ]
     else:
         scope_values = token_scopes
+
+    FAILED_AUTH_ATTEMPTS.pop(_client_key_for_request(request), None)
 
     return {
         "role": role_name,
