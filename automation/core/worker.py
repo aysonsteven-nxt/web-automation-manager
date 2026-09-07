@@ -1,3 +1,4 @@
+import json
 import time
 from datetime import datetime, timezone
 import os
@@ -31,6 +32,7 @@ class AutomationWorker:
         self.strategy = AutomationFactory.create_strategy(
             config,
         )
+        self._api_token_warning_logged = False
 
     def run(self) -> None:
         print(
@@ -165,20 +167,25 @@ class AutomationWorker:
         state: dict[str, Any],
     ) -> None:
         try:
-            api_token = os.getenv(
-                "AUTOMATION_API_TOKEN"
-            )
+            api_token = self._get_api_token()
 
             if not api_token:
-                raise RuntimeError(
-                    "AUTOMATION_API_TOKEN is not configured."
-                )
+                if not self._api_token_warning_logged:
+                    print(
+                        "Failed to publish automation state: "
+                        "AUTOMATION_API_TOKEN or a service token in "
+                        "AUTOMATION_API_TOKENS is not configured.",
+                        flush=True,
+                    )
+                    self._api_token_warning_logged = True
+                return
 
             response = requests.post(
                 self.INTERNAL_STATE_URL,
                 json=state,
                 headers={
                     "X-API-Token": api_token,
+                    "X-API-Role": "service",
                 },
                 timeout=5,
             )
@@ -190,3 +197,48 @@ class AutomationWorker:
                 f"Failed to publish automation state: {exc}",
                 flush=True,
             )
+
+    @staticmethod
+    def _get_api_token() -> str | None:
+        configured_token = os.getenv(
+            "AUTOMATION_API_TOKEN",
+            "",
+        ).strip()
+        if configured_token:
+            return configured_token
+
+        tokens_json = os.getenv(
+            "AUTOMATION_API_TOKENS",
+            "",
+        ).strip()
+        if not tokens_json:
+            return None
+
+        try:
+            token_entries = json.loads(tokens_json)
+        except json.JSONDecodeError:
+            return None
+
+        if isinstance(token_entries, dict):
+            for token_value, entry in token_entries.items():
+                if (
+                    isinstance(entry, dict)
+                    and str(entry.get("role", "")).strip().lower()
+                    == "service"
+                ):
+                    token = str(token_value).strip()
+                    if token:
+                        return token
+
+        if isinstance(token_entries, list):
+            for entry in token_entries:
+                if (
+                    isinstance(entry, dict)
+                    and str(entry.get("role", "")).strip().lower()
+                    == "service"
+                ):
+                    token = str(entry.get("token", "")).strip()
+                    if token:
+                        return token
+
+        return None

@@ -517,6 +517,50 @@ def test_worker_publishes_state_with_api_token(
         json=state,
         headers={
             "X-API-Token": "test-api-token",
+            "X-API-Role": "service",
         },
         timeout=5,
+    )
+
+
+def test_worker_publishes_state_with_service_token_from_registry(
+    monkeypatch,
+):
+    monkeypatch.delenv(
+        "AUTOMATION_API_TOKEN",
+        raising=False,
+    )
+    monkeypatch.setenv(
+        "AUTOMATION_API_TOKENS",
+        '{"service-token": {"role": "service"}}',
+    )
+
+    assert AutomationWorker._get_api_token() == "service-token"
+
+
+@patch("automation.core.worker.requests.post")
+def test_worker_logs_missing_api_token_once(
+    mock_post,
+    monkeypatch,
+):
+    monkeypatch.delenv(
+        "AUTOMATION_API_TOKEN",
+        raising=False,
+    )
+    monkeypatch.delenv(
+        "AUTOMATION_API_TOKENS",
+        raising=False,
+    )
+    worker = create_worker()
+
+    with patch("builtins.print") as mock_print:
+        worker._publish_state({"automationId": "test"})
+        worker._publish_state({"automationId": "test"})
+
+    mock_post.assert_not_called()
+    mock_print.assert_called_once_with(
+        "Failed to publish automation state: "
+        "AUTOMATION_API_TOKEN or a service token in "
+        "AUTOMATION_API_TOKENS is not configured.",
+        flush=True,
     )
