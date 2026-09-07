@@ -1,7 +1,9 @@
 from pathlib import Path
+import os
+import secrets
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
 
@@ -27,6 +29,35 @@ app.add_middleware(
 )
 
 
+def require_api_token(
+    api_token: str | None = Header(
+        default=None,
+        alias="X-API-Token",
+    ),
+) -> None:
+    configured_token = os.getenv(
+        "AUTOMATION_API_TOKEN"
+    )
+
+    if not configured_token:
+        raise HTTPException(
+            status_code=503,
+            detail="API authentication is not configured.",
+        )
+
+    if api_token is None or not secrets.compare_digest(
+        api_token,
+        configured_token,
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or missing API token.",
+            headers={
+                "WWW-Authenticate": "API token",
+            },
+        )
+
+
 @app.get("/api/hello")
 def hello():
     return {
@@ -35,7 +66,9 @@ def hello():
 
 
 @app.get("/api/automations")
-def automation_list():
+def automation_list(
+    _: None = Depends(require_api_token),
+):
 
     result = []
 
@@ -63,6 +96,7 @@ def automation_list():
 )
 def automation_status(
     automation_id: str,
+    _: None = Depends(require_api_token),
 ):
 
     try:
@@ -82,6 +116,7 @@ def automation_status(
 )
 def automation_pids(
     automation_id: str,
+    _: None = Depends(require_api_token),
 ):
 
     try:
@@ -109,6 +144,7 @@ def automation_pids(
 )
 async def start_automation(
     automation_id: str,
+    _: None = Depends(require_api_token),
 ):
 
     try:
@@ -152,6 +188,7 @@ async def start_automation(
 )
 async def stop_automation(
     automation_id: str,
+    _: None = Depends(require_api_token),
 ):
 
     try:
@@ -195,6 +232,7 @@ async def stop_automation(
 )
 async def stop_all_automation_workers(
     automation_id: str,
+    _: None = Depends(require_api_token),
 ):
 
     try:
@@ -241,6 +279,7 @@ async def stop_all_automation_workers(
 )
 def automation_state(
     automation_id: str,
+    _: None = Depends(require_api_token),
 ):
 
     try:
@@ -292,6 +331,7 @@ def automation_state(
 )
 async def automation_state_update(
     state: dict[str, Any],
+    _: None = Depends(require_api_token),
 ):
 
     await event_manager.broadcast(
@@ -305,7 +345,9 @@ async def automation_state_update(
 
 
 @app.get("/api/events")
-async def events():
+async def events(
+    _: None = Depends(require_api_token),
+):
 
     queue = await event_manager.connect()
 
@@ -331,7 +373,9 @@ async def events():
 
 
 @app.post("/api/events/test")
-async def test_event():
+async def test_event(
+    _: None = Depends(require_api_token),
+):
 
     await event_manager.broadcast(
         "test",
