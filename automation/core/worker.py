@@ -1,5 +1,6 @@
 import time
 from datetime import datetime, timezone
+import os
 from pathlib import Path
 from typing import Any
 
@@ -164,9 +165,21 @@ class AutomationWorker:
         state: dict[str, Any],
     ) -> None:
         try:
+            api_token = os.getenv(
+                "AUTOMATION_API_TOKEN"
+            )
+
+            if not api_token:
+                raise RuntimeError(
+                    "AUTOMATION_API_TOKEN is not configured."
+                )
+
             response = requests.post(
                 self.INTERNAL_STATE_URL,
                 json=state,
+                headers={
+                    "X-API-Token": api_token,
+                },
                 timeout=5,
             )
 

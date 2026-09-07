@@ -1,11 +1,32 @@
+import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi.testclient import TestClient
 
+os.environ["AUTOMATION_API_TOKEN"] = "test-api-token"
+
 from api import app
 
 
-client = TestClient(app)
+class AuthenticatedTestClient(TestClient):
+    def request(self, *args, **kwargs):
+        headers = dict(
+            kwargs.pop("headers", None) or {}
+        )
+        headers.setdefault(
+            "X-API-Token",
+            "test-api-token",
+        )
+
+        return super().request(
+            *args,
+            headers=headers,
+            **kwargs,
+        )
+
+
+client = AuthenticatedTestClient(app)
+unauthenticated_client = TestClient(app)
 
 
 # ============================================================
@@ -23,6 +44,28 @@ def test_hello():
     assert response.json() == {
         "message": "Automation API is working!"
     }
+
+
+def test_protected_endpoint_rejects_missing_token():
+    response = unauthenticated_client.get(
+        "/api/automations"
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "detail": "Invalid or missing API token.",
+    }
+
+
+def test_protected_endpoint_rejects_invalid_token():
+    response = unauthenticated_client.get(
+        "/api/automations",
+        headers={
+            "X-API-Token": "wrong-token",
+        },
+    )
+
+    assert response.status_code == 401
 
 
 # ============================================================

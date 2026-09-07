@@ -1,8 +1,12 @@
+import os
 from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
 
 from automation.core.config import AutomationConfig
 from automation.core.worker import AutomationWorker
+
+
+os.environ["AUTOMATION_API_TOKEN"] = "test-api-token"
 
 
 def create_config(
@@ -493,4 +497,26 @@ def test_worker_saves_and_publishes_state():
 
     publish_state.assert_called_once_with(
         expected_state,
+    )
+
+
+@patch("automation.core.worker.requests.post")
+def test_worker_publishes_state_with_api_token(
+    mock_post,
+):
+    worker = create_worker()
+    state = {
+        "automationId": "test",
+        "credits": 100,
+    }
+
+    worker._publish_state(state)
+
+    mock_post.assert_called_once_with(
+        worker.INTERNAL_STATE_URL,
+        json=state,
+        headers={
+            "X-API-Token": "test-api-token",
+        },
+        timeout=5,
     )
