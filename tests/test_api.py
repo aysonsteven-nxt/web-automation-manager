@@ -69,6 +69,73 @@ def test_protected_endpoint_rejects_invalid_token():
     assert response.status_code == 401
 
 
+def test_successful_api_audit_does_not_log_token(tmp_path, monkeypatch):
+    audit_log_path = tmp_path / "audit.log"
+    monkeypatch.setattr(
+        "api.AUDIT_LOG_PATH",
+        audit_log_path,
+    )
+
+    response = unauthenticated_client.get(
+        "/api/automations",
+        headers={
+            "X-API-Token": "test-api-token",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "test-api-token" not in audit_log_path.read_text(
+        encoding="utf-8"
+    )
+
+
+@patch("api.event_manager")
+def test_internal_state_acknowledgement_does_not_echo_sensitive_payload(
+    mock_events,
+):
+    mock_events.broadcast = AsyncMock()
+    sensitive_value = "browser-cookie-value"
+
+    response = client.post(
+        "/api/internal/automation/state",
+        json={
+            "automationId": "test-automation",
+            "sessionCookie": sensitive_value,
+        },
+        headers={
+            "X-API-Role": "service",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "received": True
+    }
+    assert sensitive_value not in response.text
+
+
+def test_failed_authentication_is_rate_limited():
+    from automation.core import security as security_module
+
+    security_module.FAILED_AUTH_ATTEMPTS.clear()
+
+    for attempt in range(5):
+        response = unauthenticated_client.get(
+            "/api/automations",
+            headers={
+                "X-API-Token": "wrong-token",
+            },
+        )
+
+        if attempt < 4:
+            assert response.status_code == 401
+        else:
+            assert response.status_code == 429
+            assert response.json() == {
+                "detail": "Too many failed authentication attempts. Please retry later."
+            }
+
+
 def test_expired_token_is_rejected(monkeypatch):
     monkeypatch.setenv(
         "AUTOMATION_API_TOKEN",
