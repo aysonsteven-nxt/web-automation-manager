@@ -1,0 +1,23 @@
+{
+  "automations": [
+    {
+      "id": "ci-automation",
+      "name": "CI Automation",
+      "type": "web",
+      "strategy": "voting",
+      "config": {
+        "web": {
+          "url": "https://example.com",
+          "session_file": "ci_session.json"
+        },
+        "strategy": {
+          "action_delay_seconds": 0
+        }
+      },
+      "state_file": "state/ci-automation.json",
+      "log_file": "logs/ci-automation.log",
+      "check_interval_seconds": 60,
+      "enabled": false
+    }
+  ]
+}

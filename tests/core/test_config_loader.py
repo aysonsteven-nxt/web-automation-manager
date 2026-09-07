@@ -192,6 +192,61 @@ def test_load_by_id_unknown_automation(
         )
 
 
+@pytest.mark.parametrize(
+    ("field_path", "field_value"),
+    [
+        (("config", "web", "session_file"), "../outside.json"),
+        (("state_file",), "../outside.json"),
+        (("log_file",), "C:/outside.log"),
+    ],
+)
+def test_load_all_rejects_paths_outside_project(
+    tmp_path,
+    field_path,
+    field_value,
+):
+    config = automation_data()
+    target = config
+    for key in field_path[:-1]:
+        target = target[key]
+    target[field_path[-1]] = field_value
+
+    AutomationConfigLoader.CONFIG_FILE = write_config(
+        tmp_path,
+        [config],
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="must stay within the project",
+    ):
+        AutomationConfigLoader.load_all()
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "file:///etc/passwd",
+        "javascript:alert(1)",
+        "not-a-url",
+    ],
+)
+def test_load_all_rejects_unsafe_web_urls(tmp_path, url):
+    config = automation_data()
+    config["config"]["web"]["url"] = url
+
+    AutomationConfigLoader.CONFIG_FILE = write_config(
+        tmp_path,
+        [config],
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="must use http or https",
+    ):
+        AutomationConfigLoader.load_all()
+
+
 def test_load_all_missing_config_file(
     tmp_path,
 ):

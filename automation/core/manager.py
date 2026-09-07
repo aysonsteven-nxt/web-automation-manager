@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from automation.core.config_loader import AutomationConfigLoader
 from automation.core.process import AutomationProcess
 
