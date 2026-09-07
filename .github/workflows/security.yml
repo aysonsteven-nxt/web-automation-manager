@@ -55,3 +55,32 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-and-smoke-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+
+      - name: Verify dependency consistency
+        run: python -m pip check
+
+      - name: Compile Python sources
+        run: python -m compileall -q api.py automation run_automation.py session_check.py session_manager.py watch_votes.py
+
+      - name: Prepare CI configuration
+        run: cp automations.ci.json automations.json
+
+      - name: Import application
+        env:
+          AUTOMATION_API_TOKEN: ci-test-token
+        run: python -c "import api; assert api.app.title == 'Automation Manager API'"
