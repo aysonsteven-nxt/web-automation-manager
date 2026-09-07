@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from urllib.parse import urlparse
 
 from automation.core.config import AutomationConfig
 
@@ -9,6 +10,35 @@ class AutomationConfigLoader:
         Path(__file__).resolve().parent.parent.parent
         / "automations.json"
     )
+
+    @staticmethod
+    def _validate_config_item(item: dict) -> None:
+        web_config = item.get("config", {}).get("web", {})
+        url = web_config.get("url", "")
+        parsed_url = urlparse(url)
+
+        if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+            raise ValueError(
+                "Automation web URL must use http or https."
+            )
+
+        path_values = {
+            "session_file": web_config.get("session_file"),
+            "state_file": item.get("state_file"),
+            "log_file": item.get("log_file"),
+        }
+
+        for field_name, path_value in path_values.items():
+            if not isinstance(path_value, str) or not path_value.strip():
+                raise ValueError(
+                    f"Automation {field_name} must be a non-empty path."
+                )
+
+            path = Path(path_value)
+            if path.is_absolute() or ".." in path.parts:
+                raise ValueError(
+                    f"Automation {field_name} must stay within the project."
+                )
 
     @classmethod
     def load_all(cls) -> list[AutomationConfig]:
@@ -35,10 +65,17 @@ class AutomationConfigLoader:
                 "'automations' must be an array in automations.json"
             )
 
-        return [
-            AutomationConfig(**item)
-            for item in automations
-        ]
+        configs = []
+        for item in automations:
+            if not isinstance(item, dict):
+                raise ValueError(
+                    "Each automation configuration must be an object."
+                )
+
+            cls._validate_config_item(item)
+            configs.append(AutomationConfig(**item))
+
+        return configs
 
     @classmethod
     def load_by_id(

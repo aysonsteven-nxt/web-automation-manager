@@ -101,7 +101,9 @@ def test_start_creates_playwright_browser_context_and_page(
         headless=True,
     )
 
-    browser.new_context.assert_called_once_with()
+    browser.new_context.assert_called_once_with(
+        permissions=[],
+    )
 
     context.new_page.assert_called_once()
 
@@ -172,6 +174,7 @@ def test_start_loads_storage_state_when_session_file_exists(
     automation.start()
 
     browser.new_context.assert_called_once_with(
+        permissions=[],
         storage_state=str(session_file),
     )
 
@@ -229,7 +232,9 @@ def test_start_does_not_load_storage_state_when_session_file_does_not_exist(
 
     automation.start()
 
-    browser.new_context.assert_called_once_with()
+    browser.new_context.assert_called_once_with(
+        permissions=[],
+    )
 
 
 @patch(
