@@ -179,6 +179,7 @@ class AutomationWorker:
                 json=state,
                 headers={
                     "X-API-Token": api_token,
+                    "X-API-Role": "service",
                 },
                 timeout=5,
             )
