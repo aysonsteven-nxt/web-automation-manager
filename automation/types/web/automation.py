@@ -42,20 +42,19 @@ class WebAutomation(Automation):
             headless=True,
         )
 
-        context_options = {}
-
         session_file = Path(
             self.web_config.session_file
         )
 
         if session_file.exists():
-            context_options["storage_state"] = (
-                str(session_file)
+            self.context = self.browser.new_context(
+                permissions=[],
+                storage_state=str(session_file),
             )
-
-        self.context = self.browser.new_context(
-            **context_options,
-        )
+        else:
+            self.context = self.browser.new_context(
+                permissions=[],
+            )
 
         self.page = self.context.new_page()
 

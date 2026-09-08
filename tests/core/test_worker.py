@@ -1,8 +1,12 @@
+import os
 from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
 
 from automation.core.config import AutomationConfig
 from automation.core.worker import AutomationWorker
+
+
+os.environ["AUTOMATION_API_TOKEN"] = "test-api-token"
 
 
 def create_config(
@@ -493,4 +497,70 @@ def test_worker_saves_and_publishes_state():
 
     publish_state.assert_called_once_with(
         expected_state,
+    )
+
+
+@patch("automation.core.worker.requests.post")
+def test_worker_publishes_state_with_api_token(
+    mock_post,
+):
+    worker = create_worker()
+    state = {
+        "automationId": "test",
+        "credits": 100,
+    }
+
+    worker._publish_state(state)
+
+    mock_post.assert_called_once_with(
+        worker.INTERNAL_STATE_URL,
+        json=state,
+        headers={
+            "X-API-Token": "test-api-token",
+            "X-API-Role": "service",
+        },
+        timeout=5,
+    )
+
+
+def test_worker_publishes_state_with_service_token_from_registry(
+    monkeypatch,
+):
+    monkeypatch.delenv(
+        "AUTOMATION_API_TOKEN",
+        raising=False,
+    )
+    monkeypatch.setenv(
+        "AUTOMATION_API_TOKENS",
+        '{"service-token": {"role": "service"}}',
+    )
+
+    assert AutomationWorker._get_api_token() == "service-token"
+
+
+@patch("automation.core.worker.requests.post")
+def test_worker_logs_missing_api_token_once(
+    mock_post,
+    monkeypatch,
+):
+    monkeypatch.delenv(
+        "AUTOMATION_API_TOKEN",
+        raising=False,
+    )
+    monkeypatch.delenv(
+        "AUTOMATION_API_TOKENS",
+        raising=False,
+    )
+    worker = create_worker()
+
+    with patch("builtins.print") as mock_print:
+        worker._publish_state({"automationId": "test"})
+        worker._publish_state({"automationId": "test"})
+
+    mock_post.assert_not_called()
+    mock_print.assert_called_once_with(
+        "Failed to publish automation state: "
+        "AUTOMATION_API_TOKEN or a service token in "
+        "AUTOMATION_API_TOKENS is not configured.",
+        flush=True,
     )

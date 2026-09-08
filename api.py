@@ -1,13 +1,22 @@
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
 
+from automation.core import security as security_module
 from automation.core.events import event_manager
 from automation.core.manager import automation_manager
+from automation.core.security import (
+    require_api_token,
+    require_automation_access,
+    require_role,
+    write_audit_event,
+)
 from automation.core.state import load_state
+
+AUDIT_LOG_PATH = security_module.AUDIT_LOG_PATH
 
 
 app = FastAPI(
@@ -35,7 +44,22 @@ def hello():
 
 
 @app.get("/api/automations")
-def automation_list():
+def automation_list(
+    context: dict[str, Any] = Depends(
+        require_role(
+            "viewer",
+            "operator",
+            "admin",
+            "service",
+        )
+    ),
+):
+    write_audit_event(
+        "automation",
+        principal=context["principal"],
+        action="list_automations",
+        status="success",
+    )
 
     result = []
 
@@ -63,7 +87,16 @@ def automation_list():
 )
 def automation_status(
     automation_id: str,
+    context: dict[str, Any] = Depends(require_api_token),
 ):
+    require_automation_access(automation_id, context)
+    write_audit_event(
+        "automation",
+        principal=context["principal"],
+        action="status.read",
+        automation_id=automation_id,
+        status="success",
+    )
 
     try:
         return automation_manager.status(
@@ -82,7 +115,16 @@ def automation_status(
 )
 def automation_pids(
     automation_id: str,
+    context: dict[str, Any] = Depends(require_api_token),
 ):
+    require_automation_access(automation_id, context)
+    write_audit_event(
+        "automation",
+        principal=context["principal"],
+        action="pids.read",
+        automation_id=automation_id,
+        status="success",
+    )
 
     try:
 
@@ -109,7 +151,9 @@ def automation_pids(
 )
 async def start_automation(
     automation_id: str,
+    context: dict[str, Any] = Depends(require_role("operator", "admin")),
 ):
+    require_automation_access(automation_id, context)
 
     try:
 
@@ -126,6 +170,15 @@ async def start_automation(
                 "automation_status",
                 status,
             )
+
+        write_audit_event(
+            "automation",
+            principal=context["principal"],
+            action="automation.start",
+            automation_id=automation_id,
+            status="success" if started else "failed",
+            details={"started": started},
+        )
 
         return {
             "started": started,
@@ -152,7 +205,9 @@ async def start_automation(
 )
 async def stop_automation(
     automation_id: str,
+    context: dict[str, Any] = Depends(require_role("operator", "admin")),
 ):
+    require_automation_access(automation_id, context)
 
     try:
 
@@ -169,6 +224,15 @@ async def stop_automation(
                 "automation_status",
                 status,
             )
+
+        write_audit_event(
+            "automation",
+            principal=context["principal"],
+            action="automation.stop",
+            automation_id=automation_id,
+            status="success" if stopped else "failed",
+            details={"stopped": stopped},
+        )
 
         return {
             "stopped": stopped,
@@ -195,7 +259,9 @@ async def stop_automation(
 )
 async def stop_all_automation_workers(
     automation_id: str,
+    context: dict[str, Any] = Depends(require_role("operator", "admin")),
 ):
+    require_automation_access(automation_id, context)
 
     try:
 
@@ -212,6 +278,15 @@ async def stop_all_automation_workers(
         await event_manager.broadcast(
             "automation_status",
             status,
+        )
+
+        write_audit_event(
+            "automation",
+            principal=context["principal"],
+            action="automation.stop_all",
+            automation_id=automation_id,
+            status="success",
+            details={"stopped": len(stopped_pids)},
         )
 
         return {
@@ -241,7 +316,9 @@ async def stop_all_automation_workers(
 )
 def automation_state(
     automation_id: str,
+    context: dict[str, Any] = Depends(require_api_token),
 ):
+    require_automation_access(automation_id, context)
 
     try:
 
@@ -277,6 +354,14 @@ def automation_state(
                 ),
             )
 
+        write_audit_event(
+            "automation",
+            principal=context["principal"],
+            action="state.read",
+            automation_id=automation_id,
+            status="success",
+        )
+
         return state
 
     except (KeyError, ValueError) as exc:
@@ -292,11 +377,24 @@ def automation_state(
 )
 async def automation_state_update(
     state: dict[str, Any],
+    context: dict[str, Any] = Depends(
+        require_role(
+            "service",
+        )
+    ),
 ):
 
     await event_manager.broadcast(
         "automation_state",
         state,
+    )
+
+    write_audit_event(
+        "automation",
+        principal=context["principal"],
+        action="state.publish",
+        automation_id=state.get("automationId"),
+        status="success",
     )
 
     return {
@@ -305,7 +403,22 @@ async def automation_state_update(
 
 
 @app.get("/api/events")
-async def events():
+async def events(
+    context: dict[str, Any] = Depends(
+        require_role(
+            "viewer",
+            "operator",
+            "admin",
+            "service",
+        )
+    ),
+):
+    write_audit_event(
+        "automation",
+        principal=context["principal"],
+        action="event.stream.connect",
+        status="success",
+    )
 
     queue = await event_manager.connect()
 
@@ -331,7 +444,20 @@ async def events():
 
 
 @app.post("/api/events/test")
-async def test_event():
+async def test_event(
+    context: dict[str, Any] = Depends(
+        require_role(
+            "operator",
+            "admin",
+        )
+    ),
+):
+    write_audit_event(
+        "automation",
+        principal=context["principal"],
+        action="event.test.send",
+        status="success",
+    )
 
     await event_manager.broadcast(
         "test",
