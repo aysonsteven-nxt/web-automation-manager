@@ -227,3 +227,7 @@ available_votes.json
 /state/
 
 /.vscode
+
+# dedicated helper
+session_check.py
+session_manager.py
