@@ -227,3 +227,8 @@ available_votes.json
 /state/
 
 /.vscode
+watch_votes.py
+session_manager.py
+session_check.py
+CI_TRACKER.md
+SECURITY_TRACKER.md
