@@ -129,5 +129,3 @@ Never commit:
 - `automations.json`
 - API tokens or website credentials
 - Runtime state and logs
-
-The project is intended for local trusted operators. Multi-user identity providers, remote access, and cookie-based browser authentication are intentionally deferred until they are needed.
