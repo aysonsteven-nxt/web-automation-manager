@@ -1,6 +1,5 @@
 import json
 import os
-import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -267,7 +266,11 @@ def require_api_token(
             detail="Invalid API role.",
         )
 
-    principal_name = (api_principal or token_entry.get("principal") or "default").strip()
+    principal_name = (
+        api_principal
+        or token_entry.get("principal")
+        or "default"
+    ).strip()
     token_scopes = list(token_entry.get("scopes") or [])
     scope_values: list[str] = []
 
