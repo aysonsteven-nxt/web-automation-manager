@@ -1,0 +1,1085 @@
+import json
+import os
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from fastapi.testclient import TestClient
+
+os.environ["AUTOMATION_API_TOKEN"] = "test-api-token"
+
+from api import app
+
+
+class AuthenticatedTestClient(TestClient):
+    def request(self, *args, **kwargs):
+        headers = dict(
+            kwargs.pop("headers", None) or {}
+        )
+        headers.setdefault(
+            "X-API-Token",
+            "test-api-token",
+        )
+
+        return super().request(
+            *args,
+            headers=headers,
+            **kwargs,
+        )
+
+
+client = AuthenticatedTestClient(app)
+unauthenticated_client = TestClient(app)
+
+
+# ============================================================
+# GET /api/hello
+# ============================================================
+
+
+def test_hello():
+    response = client.get(
+        "/api/hello"
+    )
+
+    assert response.status_code == 200
+
+    assert response.json() == {
+        "message": "Automation API is working!"
+    }
+
+
+def test_protected_endpoint_rejects_missing_token():
+    response = unauthenticated_client.get(
+        "/api/automations"
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "detail": "Invalid or missing API token.",
+    }
+
+
+def test_protected_endpoint_rejects_invalid_token():
+    response = unauthenticated_client.get(
+        "/api/automations",
+        headers={
+            "X-API-Token": "wrong-token",
+        },
+    )
+
+    assert response.status_code == 401
+
+
+def test_successful_api_audit_does_not_log_token(tmp_path, monkeypatch):
+    audit_log_path = tmp_path / "audit.log"
+    monkeypatch.setattr(
+        "api.AUDIT_LOG_PATH",
+        audit_log_path,
+    )
+
+    response = unauthenticated_client.get(
+        "/api/automations",
+        headers={
+            "X-API-Token": "test-api-token",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "test-api-token" not in audit_log_path.read_text(
+        encoding="utf-8"
+    )
+
+
+@patch("api.event_manager")
+def test_internal_state_acknowledgement_does_not_echo_sensitive_payload(
+    mock_events,
+):
+    mock_events.broadcast = AsyncMock()
+    sensitive_value = "browser-cookie-value"
+
+    response = client.post(
+        "/api/internal/automation/state",
+        json={
+            "automationId": "test-automation",
+            "sessionCookie": sensitive_value,
+        },
+        headers={
+            "X-API-Role": "service",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "received": True
+    }
+    assert sensitive_value not in response.text
+
+
+def test_failed_authentication_is_rate_limited():
+    from automation.core import security as security_module
+
+    security_module.FAILED_AUTH_ATTEMPTS.clear()
+
+    for attempt in range(5):
+        response = unauthenticated_client.get(
+            "/api/automations",
+            headers={
+                "X-API-Token": "wrong-token",
+            },
+        )
+
+        if attempt < 4:
+            assert response.status_code == 401
+        else:
+            assert response.status_code == 429
+            assert response.json() == {
+                "detail": "Too many failed authentication attempts. Please retry later."
+            }
+
+
+def test_expired_token_is_rejected(monkeypatch):
+    monkeypatch.setenv(
+        "AUTOMATION_API_TOKEN",
+        "",
+    )
+    monkeypatch.setenv(
+        "AUTOMATION_API_TOKENS",
+        json.dumps([
+            {
+                "token": "expired-token",
+                "role": "viewer",
+                "principal": "expired-user",
+                "scopes": [],
+                "expires_at": "2000-01-01T00:00:00Z",
+                "revoked": False,
+            }
+        ]),
+    )
+
+    response = unauthenticated_client.get(
+        "/api/automations",
+        headers={
+            "X-API-Token": "expired-token",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "detail": "API token has expired."
+    }
+
+
+def test_revoked_token_from_registry_is_rejected(monkeypatch):
+    monkeypatch.setenv(
+        "AUTOMATION_API_TOKEN",
+        "",
+    )
+    monkeypatch.setenv(
+        "AUTOMATION_API_TOKENS",
+        json.dumps({
+            "revoked-token": {
+                "role": "viewer",
+                "principal": "revoked-user",
+                "scopes": [],
+                "revoked": True,
+            },
+            "active-token": {
+                "role": "viewer",
+                "principal": "active-user",
+                "scopes": [],
+                "revoked": False,
+            }
+        }),
+    )
+
+    response = unauthenticated_client.get(
+        "/api/automations",
+        headers={
+            "X-API-Token": "revoked-token",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "detail": "API token has been revoked."
+    }
+
+
+def test_protected_endpoint_allows_viewer_role_for_read_access():
+    response = unauthenticated_client.get(
+        "/api/automations",
+        headers={
+            "X-API-Token": "test-api-token",
+            "X-API-Role": "viewer",
+        },
+    )
+
+    assert response.status_code == 200
+
+
+def test_start_automation_rejects_viewer_role(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "api.AUDIT_LOG_PATH",
+        tmp_path / "audit.log",
+    )
+
+    response = unauthenticated_client.post(
+        "/api/automations/test-automation/start",
+        headers={
+            "X-API-Token": "test-api-token",
+            "X-API-Role": "viewer",
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "Insufficient privileges."
+    }
+
+    audit_log = (tmp_path / "audit.log").read_text(
+        encoding="utf-8"
+    )
+    assert '"category": "authorization"' in audit_log
+    assert '"status": "denied"' in audit_log
+
+
+def test_internal_state_endpoint_requires_service_role():
+    response = unauthenticated_client.post(
+        "/api/internal/automation/state",
+        json={
+            "automationId": "test-automation",
+        },
+        headers={
+            "X-API-Token": "test-api-token",
+            "X-API-Role": "viewer",
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "Insufficient privileges."
+    }
+
+
+def test_operator_must_have_scope_for_automation_action():
+    response = unauthenticated_client.post(
+        "/api/automations/test-automation/start",
+        headers={
+            "X-API-Token": "test-api-token",
+            "X-API-Role": "operator",
+            "X-API-Principal": "operator-alpha",
+            "X-API-Scopes": "automation:other-automation",
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "Insufficient privileges for this automation."
+    }
+
+
+@patch("api.automation_manager")
+def test_operator_with_matching_scope_can_start_automation(
+    mock_manager,
+):
+    mock_manager.start.return_value = True
+    mock_manager.status.return_value = {
+        "running": True,
+        "pid": 1234,
+        "returncode": None,
+    }
+
+    response = unauthenticated_client.post(
+        "/api/automations/test-automation/start",
+        headers={
+            "X-API-Token": "test-api-token",
+            "X-API-Role": "operator",
+            "X-API-Principal": "operator-alpha",
+            "X-API-Scopes": "automation:test-automation",
+        },
+    )
+
+    assert response.status_code == 200
+
+
+# ============================================================
+# GET /api/automations
+# ============================================================
+
+
+@patch("api.automation_manager")
+def test_automation_list(
+    mock_manager,
+):
+    process = MagicMock()
+
+    process.config.id = "test-automation"
+    process.config.name = "Test Automation"
+    process.config.type = "web"
+    process.config.strategy = "voting"
+    process.config.config = {
+        "url": "https://example.com",
+    }
+    process.config.enabled = True
+
+    process.status.return_value = {
+        "running": True,
+        "pid": 1234,
+        "returncode": None,
+    }
+
+    mock_manager.list.return_value = [
+        process
+    ]
+
+    response = client.get(
+        "/api/automations"
+    )
+
+    assert response.status_code == 200
+
+    assert response.json() == [
+        {
+            "id": "test-automation",
+            "name": "Test Automation",
+            "type": "web",
+            "strategy": "voting",
+            "url": "https://example.com",
+            "enabled": True,
+            "status": {
+                "running": True,
+                "pid": 1234,
+                "returncode": None,
+            },
+        }
+    ]
+
+    mock_manager.list.assert_called_once_with()
+    process.status.assert_called_once_with()
+
+
+@patch("api.automation_manager")
+def test_automation_list_returns_empty_list(
+    mock_manager,
+):
+    mock_manager.list.return_value = []
+
+    response = client.get(
+        "/api/automations"
+    )
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+# ============================================================
+# GET /api/automations/{id}/status
+# ============================================================
+
+
+@patch("api.automation_manager")
+def test_automation_status(
+    mock_manager,
+):
+    expected_status = {
+        "running": True,
+        "pid": 1234,
+        "returncode": None,
+    }
+
+    mock_manager.status.return_value = (
+        expected_status
+    )
+
+    response = client.get(
+        "/api/automations/test-automation/status"
+    )
+
+    assert response.status_code == 200
+    assert response.json() == expected_status
+
+    mock_manager.status.assert_called_once_with(
+        "test-automation"
+    )
+
+
+@patch("api.automation_manager")
+def test_automation_status_returns_404_for_unknown_automation(
+    mock_manager,
+):
+    mock_manager.status.side_effect = KeyError(
+        "Automation 'missing' not found"
+    )
+
+    response = client.get(
+        "/api/automations/missing/status"
+    )
+
+    assert response.status_code == 404
+    assert "Automation 'missing' not found" in response.json()["detail"]
+
+
+@patch("api.automation_manager")
+def test_automation_status_returns_404_for_value_error(
+    mock_manager,
+):
+    mock_manager.status.side_effect = ValueError(
+        "Invalid automation"
+    )
+
+    response = client.get(
+        "/api/automations/test/status"
+    )
+
+    assert response.status_code == 404
+
+    assert response.json() == {
+        "detail": "Invalid automation"
+    }
+
+
+# ============================================================
+# GET /api/automations/{id}/pids
+# ============================================================
+
+
+@patch("api.automation_manager")
+def test_automation_pids(
+    mock_manager,
+):
+    mock_manager.pids.return_value = [
+        1234,
+        5678,
+    ]
+
+    response = client.get(
+        "/api/automations/test-automation/pids"
+    )
+
+    assert response.status_code == 200
+
+    assert response.json() == {
+        "automationId": "test-automation",
+        "count": 2,
+        "pids": [
+            1234,
+            5678,
+        ],
+    }
+
+    mock_manager.pids.assert_called_once_with(
+        "test-automation"
+    )
+
+
+@patch("api.automation_manager")
+def test_automation_pids_returns_empty_when_no_workers(
+    mock_manager,
+):
+    mock_manager.pids.return_value = []
+
+    response = client.get(
+        "/api/automations/test-automation/pids"
+    )
+
+    assert response.status_code == 200
+
+    assert response.json() == {
+        "automationId": "test-automation",
+        "count": 0,
+        "pids": [],
+    }
+
+
+@patch("api.automation_manager")
+def test_automation_pids_returns_404_for_unknown_automation(
+    mock_manager,
+):
+    mock_manager.pids.side_effect = KeyError(
+        "Automation 'missing' not found"
+    )
+
+    response = client.get(
+        "/api/automations/missing/pids"
+    )
+
+    assert response.status_code == 404
+
+
+# ============================================================
+# POST /api/automations/{id}/start
+# ============================================================
+
+
+@patch("api.event_manager")
+@patch("api.automation_manager")
+def test_start_automation_success(
+    mock_manager,
+    mock_events,
+):
+    mock_manager.start.return_value = True
+
+    expected_status = {
+        "running": True,
+        "pid": 1234,
+        "returncode": None,
+    }
+
+    mock_manager.status.return_value = (
+        expected_status
+    )
+
+    mock_events.broadcast = AsyncMock()
+
+    response = client.post(
+        "/api/automations/test-automation/start"
+    )
+
+    assert response.status_code == 200
+
+    assert response.json() == {
+        "started": True,
+        **expected_status,
+    }
+
+    mock_manager.start.assert_called_once_with(
+        "test-automation"
+    )
+
+    mock_manager.status.assert_called_once_with(
+        "test-automation"
+    )
+
+    mock_events.broadcast.assert_awaited_once_with(
+        "automation_status",
+        expected_status,
+    )
+
+
+@patch("api.event_manager")
+@patch("api.automation_manager")
+def test_start_automation_when_already_running(
+    mock_manager,
+    mock_events,
+):
+    mock_manager.start.return_value = False
+
+    expected_status = {
+        "running": True,
+        "pid": 1234,
+        "returncode": None,
+    }
+
+    mock_manager.status.return_value = (
+        expected_status
+    )
+
+    mock_events.broadcast = AsyncMock()
+
+    response = client.post(
+        "/api/automations/test-automation/start"
+    )
+
+    assert response.status_code == 200
+
+    assert response.json() == {
+        "started": False,
+        **expected_status,
+    }
+
+    mock_events.broadcast.assert_not_awaited()
+
+
+@patch("api.automation_manager")
+def test_start_automation_returns_404_for_unknown_automation(
+    mock_manager,
+):
+    mock_manager.start.side_effect = KeyError(
+        "Automation 'missing' not found"
+    )
+
+    response = client.post(
+        "/api/automations/missing/start"
+    )
+
+    assert response.status_code == 404
+
+
+@patch("api.automation_manager")
+def test_start_automation_returns_500_for_unexpected_error(
+    mock_manager,
+):
+    mock_manager.start.side_effect = Exception(
+        "Unexpected failure"
+    )
+
+    response = client.post(
+        "/api/automations/test/start"
+    )
+
+    assert response.status_code == 500
+
+    assert response.json() == {
+        "detail": "Unexpected failure"
+    }
+
+
+# ============================================================
+# POST /api/automations/{id}/stop
+# ============================================================
+
+
+@patch("api.event_manager")
+@patch("api.automation_manager")
+def test_stop_automation_success(
+    mock_manager,
+    mock_events,
+):
+    mock_manager.stop.return_value = True
+
+    expected_status = {
+        "running": False,
+        "pid": 1234,
+        "returncode": 0,
+    }
+
+    mock_manager.status.return_value = (
+        expected_status
+    )
+
+    mock_events.broadcast = AsyncMock()
+
+    response = client.post(
+        "/api/automations/test-automation/stop"
+    )
+
+    assert response.status_code == 200
+
+    assert response.json() == {
+        "stopped": True,
+        **expected_status,
+    }
+
+    mock_manager.stop.assert_called_once_with(
+        "test-automation"
+    )
+
+    mock_events.broadcast.assert_awaited_once_with(
+        "automation_status",
+        expected_status,
+    )
+
+
+@patch("api.event_manager")
+@patch("api.automation_manager")
+def test_stop_automation_when_not_running(
+    mock_manager,
+    mock_events,
+):
+    mock_manager.stop.return_value = False
+
+    expected_status = {
+        "running": False,
+        "pid": None,
+        "returncode": None,
+    }
+
+    mock_manager.status.return_value = (
+        expected_status
+    )
+
+    mock_events.broadcast = AsyncMock()
+
+    response = client.post(
+        "/api/automations/test-automation/stop"
+    )
+
+    assert response.status_code == 200
+
+    assert response.json() == {
+        "stopped": False,
+        **expected_status,
+    }
+
+    mock_events.broadcast.assert_not_awaited()
+
+
+@patch("api.automation_manager")
+def test_stop_automation_returns_404_for_unknown_automation(
+    mock_manager,
+):
+    mock_manager.stop.side_effect = KeyError(
+        "Automation 'missing' not found"
+    )
+
+    response = client.post(
+        "/api/automations/missing/stop"
+    )
+
+    assert response.status_code == 404
+
+
+@patch("api.automation_manager")
+def test_stop_automation_returns_500_for_unexpected_error(
+    mock_manager,
+):
+    mock_manager.stop.side_effect = Exception(
+        "Unexpected failure"
+    )
+
+    response = client.post(
+        "/api/automations/test/stop"
+    )
+
+    assert response.status_code == 500
+
+    assert response.json() == {
+        "detail": "Unexpected failure"
+    }
+
+
+# ============================================================
+# POST /api/automations/{id}/stop-all
+# ============================================================
+
+
+@patch("api.event_manager")
+@patch("api.automation_manager")
+def test_stop_all_automation_workers(
+    mock_manager,
+    mock_events,
+):
+    stopped_pids = [
+        1234,
+        5678,
+    ]
+
+    expected_status = {
+        "running": False,
+        "pid": None,
+        "returncode": 0,
+    }
+
+    mock_manager.stop_all.return_value = (
+        stopped_pids
+    )
+
+    mock_manager.status.return_value = (
+        expected_status
+    )
+
+    mock_events.broadcast = AsyncMock()
+
+    response = client.post(
+        "/api/automations/test-automation/stop-all"
+    )
+
+    assert response.status_code == 200
+
+    assert response.json() == {
+        "automationId": "test-automation",
+        "stopped": 2,
+        "pids": [
+            1234,
+            5678,
+        ],
+        **expected_status,
+    }
+
+    mock_manager.stop_all.assert_called_once_with(
+        "test-automation"
+    )
+
+    mock_manager.status.assert_called_once_with(
+        "test-automation"
+    )
+
+    mock_events.broadcast.assert_awaited_once_with(
+        "automation_status",
+        expected_status,
+    )
+
+
+@patch("api.event_manager")
+@patch("api.automation_manager")
+def test_stop_all_when_no_workers_are_running(
+    mock_manager,
+    mock_events,
+):
+    expected_status = {
+        "running": False,
+        "pid": None,
+        "returncode": None,
+    }
+
+    mock_manager.stop_all.return_value = []
+    mock_manager.status.return_value = (
+        expected_status
+    )
+
+    mock_events.broadcast = AsyncMock()
+
+    response = client.post(
+        "/api/automations/test-automation/stop-all"
+    )
+
+    assert response.status_code == 200
+
+    assert response.json() == {
+        "automationId": "test-automation",
+        "stopped": 0,
+        "pids": [],
+        **expected_status,
+    }
+
+    mock_events.broadcast.assert_awaited_once_with(
+        "automation_status",
+        expected_status,
+    )
+
+
+@patch("api.automation_manager")
+def test_stop_all_returns_404_for_unknown_automation(
+    mock_manager,
+):
+    mock_manager.stop_all.side_effect = KeyError(
+        "Automation 'missing' not found"
+    )
+
+    response = client.post(
+        "/api/automations/missing/stop-all"
+    )
+
+    assert response.status_code == 404
+
+
+@patch("api.automation_manager")
+def test_stop_all_returns_500_for_unexpected_error(
+    mock_manager,
+):
+    mock_manager.stop_all.side_effect = Exception(
+        "Unexpected failure"
+    )
+
+    response = client.post(
+        "/api/automations/test/stop-all"
+    )
+
+    assert response.status_code == 500
+
+    assert response.json() == {
+        "detail": "Unexpected failure"
+    }
+
+
+# ============================================================
+# GET /api/automations/{id}/state
+# ============================================================
+
+
+@patch("api.load_state")
+@patch("api.automation_manager")
+def test_automation_state_returns_state(
+    mock_manager,
+    mock_load_state,
+):
+    process = MagicMock()
+
+    process.config.state_file = (
+        "state/test.json"
+    )
+
+    process.status.return_value = {
+        "running": True,
+    }
+
+    mock_manager.get.return_value = process
+
+    expected_state = {
+        "automationId": "test-automation",
+        "credits": 100,
+    }
+
+    mock_load_state.return_value = (
+        expected_state
+    )
+
+    response = client.get(
+        "/api/automations/test-automation/state"
+    )
+
+    assert response.status_code == 200
+
+    assert response.json() == expected_state
+
+    mock_manager.get.assert_called_once_with(
+        "test-automation"
+    )
+
+    mock_load_state.assert_called_once()
+
+
+@patch("api.load_state")
+@patch("api.automation_manager")
+def test_automation_state_returns_worker_inactive(
+    mock_manager,
+    mock_load_state,
+):
+    process = MagicMock()
+    process.status.return_value = {
+        "running": False,
+    }
+    mock_manager.get.return_value = process
+
+    response = client.get(
+        "/api/automations/test-automation/state"
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": "Worker is not active.",
+    }
+
+    mock_load_state.assert_not_called()
+
+
+@patch("api.load_state")
+@patch("api.automation_manager")
+def test_automation_state_returns_404_when_state_does_not_exist(
+    mock_manager,
+    mock_load_state,
+):
+    process = MagicMock()
+
+    process.config.state_file = (
+        "state/test.json"
+    )
+
+    mock_manager.get.return_value = process
+
+    mock_load_state.return_value = None
+
+    response = client.get(
+        "/api/automations/test-automation/state"
+    )
+
+    assert response.status_code == 404
+
+    assert response.json() == {
+        "detail": "No automation state available yet."
+    }
+
+
+@patch("api.automation_manager")
+def test_automation_state_returns_404_for_unknown_automation(
+    mock_manager,
+):
+    mock_manager.get.side_effect = KeyError(
+        "Automation 'missing' not found"
+    )
+
+    response = client.get(
+        "/api/automations/missing/state"
+    )
+
+    assert response.status_code == 404
+
+
+@patch("api.automation_manager")
+def test_start_automation_logs_successful_admin_action(
+    mock_manager,
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(
+        "api.AUDIT_LOG_PATH",
+        tmp_path / "audit.log",
+    )
+
+    mock_manager.start.return_value = True
+    mock_manager.status.return_value = {
+        "running": True,
+        "pid": 1234,
+        "returncode": None,
+    }
+
+    response = client.post(
+        "/api/automations/test-automation/start",
+        headers={
+            "X-API-Role": "admin",
+            "X-API-Principal": "admin-user",
+            "X-API-Scopes": "automation:test-automation",
+        },
+    )
+
+    assert response.status_code == 200
+
+    audit_log = (tmp_path / "audit.log").read_text(
+        encoding="utf-8"
+    )
+    assert '"action": "automation.start"' in audit_log
+    assert '"status": "success"' in audit_log
+
+
+# ============================================================
+# POST /api/internal/automation/state
+# ============================================================
+
+
+@patch("api.event_manager")
+def test_automation_state_update(
+    mock_events,
+):
+    mock_events.broadcast = AsyncMock()
+
+    state = {
+        "automationId": "test-automation",
+        "credits": 123,
+    }
+
+    response = client.post(
+        "/api/internal/automation/state",
+        json=state,
+        headers={
+            "X-API-Role": "service",
+        },
+    )
+
+    assert response.status_code == 200
+
+    assert response.json() == {
+        "received": True
+    }
+
+    mock_events.broadcast.assert_awaited_once_with(
+        "automation_state",
+        state,
+    )
+
+
+# ============================================================
+# POST /api/events/test
+# ============================================================
+
+
+@patch("api.event_manager")
+def test_event(
+    mock_events,
+):
+    mock_events.broadcast = AsyncMock()
+
+    response = client.post(
+        "/api/events/test"
+    )
+
+    assert response.status_code == 200
+
+    assert response.json() == {
+        "sent": True
+    }
+
+    mock_events.broadcast.assert_awaited_once_with(
+        "test",
+        {
+            "message": "SSE is working!"
+        },
+    )

@@ -1,0 +1,566 @@
+import os
+from pathlib import Path
+from unittest.mock import ANY, MagicMock, patch
+
+from automation.core.config import AutomationConfig
+from automation.core.worker import AutomationWorker
+
+
+os.environ["AUTOMATION_API_TOKEN"] = "test-api-token"
+
+
+def create_config(
+    automation_id="test",
+) -> AutomationConfig:
+    return AutomationConfig(
+        id=automation_id,
+        name="Test Automation",
+        type="web",
+        strategy="voting",
+        config={
+            "web": {
+                "url": "https://example.com",
+                "session_file": "test_session.json",
+            },
+            "strategy": {
+                "action_delay_seconds": 3,
+            },
+        },
+        state_file="state/test.json",
+        log_file="logs/test.log",
+        check_interval_seconds=60,
+        enabled=True,
+    )
+
+
+def create_worker():
+    return AutomationWorker(
+        create_config(),
+    )
+
+
+def test_worker_creates_automation_and_strategy():
+    automation = MagicMock()
+    strategy = MagicMock()
+
+    with patch(
+        "automation.core.worker.AutomationFactory.create_automation",
+        return_value=automation,
+    ) as create_automation, patch(
+        "automation.core.worker.AutomationFactory.create_strategy",
+        return_value=strategy,
+    ) as create_strategy:
+
+        worker = create_worker()
+
+    create_automation.assert_called_once_with(
+        worker.config,
+    )
+
+    create_strategy.assert_called_once_with(
+        worker.config,
+    )
+
+    assert worker.automation is automation
+    assert worker.strategy is strategy
+
+
+def test_worker_starts_and_closes_automation():
+    automation = MagicMock()
+    strategy = MagicMock()
+
+    with patch(
+        "automation.core.worker.AutomationFactory.create_automation",
+        return_value=automation,
+    ), patch(
+        "automation.core.worker.AutomationFactory.create_strategy",
+        return_value=strategy,
+    ), patch.object(
+        AutomationWorker,
+        "_execute",
+    ) as execute:
+
+        worker = create_worker()
+        worker.run()
+
+    automation.start.assert_called_once()
+    strategy.initialize.assert_called_once_with(
+        automation,
+    )
+    execute.assert_called_once()
+    automation.close.assert_called_once()
+
+
+def test_worker_checks_strategy():
+    automation = MagicMock()
+    strategy = MagicMock()
+
+    state = {
+        "credits": 100,
+        "providers": [],
+    }
+
+    strategy.check.return_value = state
+    strategy.get_targets.return_value = []
+
+    with patch(
+        "automation.core.worker.AutomationFactory.create_automation",
+        return_value=automation,
+    ), patch(
+        "automation.core.worker.AutomationFactory.create_strategy",
+        return_value=strategy,
+    ), patch.object(
+        AutomationWorker,
+        "_wait",
+        side_effect=KeyboardInterrupt,
+    ), patch.object(
+        AutomationWorker,
+        "_save_and_publish_state",
+    ):
+
+        worker = create_worker()
+
+        try:
+            worker._execute()
+        except KeyboardInterrupt:
+            pass
+
+    strategy.check.assert_called_once_with(
+        automation,
+    )
+
+
+def test_worker_retries_after_state_check_failure():
+    automation = MagicMock()
+    strategy = MagicMock()
+
+    state = {
+        "credits": 100,
+        "providers": [],
+    }
+
+    strategy.check.side_effect = [
+        RuntimeError("temporary page failure"),
+        state,
+    ]
+    strategy.get_targets.return_value = []
+
+    with patch(
+        "automation.core.worker.AutomationFactory.create_automation",
+        return_value=automation,
+    ), patch(
+        "automation.core.worker.AutomationFactory.create_strategy",
+        return_value=strategy,
+    ), patch.object(
+        AutomationWorker,
+        "_wait",
+        side_effect=[None, KeyboardInterrupt],
+    ), patch.object(
+        AutomationWorker,
+        "_save_and_publish_state",
+    ):
+
+        worker = create_worker()
+
+        try:
+            worker._execute()
+        except KeyboardInterrupt:
+            pass
+
+    assert strategy.check.call_count == 2
+    strategy.get_targets.assert_called_once_with(
+        state,
+    )
+
+
+def test_worker_gets_targets_from_strategy():
+    automation = MagicMock()
+    strategy = MagicMock()
+
+    state = {
+        "credits": 100,
+        "providers": [],
+    }
+
+    strategy.check.return_value = state
+    strategy.get_targets.return_value = []
+
+    with patch(
+        "automation.core.worker.AutomationFactory.create_automation",
+        return_value=automation,
+    ), patch(
+        "automation.core.worker.AutomationFactory.create_strategy",
+        return_value=strategy,
+    ), patch.object(
+        AutomationWorker,
+        "_wait",
+        side_effect=KeyboardInterrupt,
+    ), patch.object(
+        AutomationWorker,
+        "_save_and_publish_state",
+    ):
+
+        worker = create_worker()
+
+        try:
+            worker._execute()
+        except KeyboardInterrupt:
+            pass
+
+    strategy.get_targets.assert_called_once_with(
+        state,
+    )
+
+
+def test_worker_executes_targets():
+    automation = MagicMock()
+    strategy = MagicMock()
+
+    state = {
+        "credits": 100,
+        "providers": [],
+    }
+
+    targets = [
+        {"id": "1"},
+        {"id": "2"},
+    ]
+
+    strategy.check.return_value = state
+    strategy.get_targets.return_value = targets
+    strategy.execute.return_value = True
+
+    with patch(
+        "automation.core.worker.AutomationFactory.create_automation",
+        return_value=automation,
+    ), patch(
+        "automation.core.worker.AutomationFactory.create_strategy",
+        return_value=strategy,
+    ), patch.object(
+        AutomationWorker,
+        "_wait",
+        side_effect=KeyboardInterrupt,
+    ), patch.object(
+        AutomationWorker,
+        "_save_and_publish_state",
+    ):
+
+        worker = create_worker()
+
+        try:
+            worker._execute()
+        except KeyboardInterrupt:
+            pass
+
+    assert strategy.execute.call_count == 2
+
+    strategy.execute.assert_any_call(
+        automation,
+        targets[0],
+    )
+
+    strategy.execute.assert_any_call(
+        automation,
+        targets[1],
+    )
+
+
+def test_worker_rechecks_state_after_successful_execution():
+    automation = MagicMock()
+    strategy = MagicMock()
+
+    initial_state = {
+        "credits": 100,
+        "providers": [],
+    }
+
+    updated_state = {
+        "credits": 101,
+        "providers": [],
+    }
+
+    strategy.check.side_effect = [
+        initial_state,
+        updated_state,
+    ]
+
+    strategy.get_targets.return_value = [
+        {"id": "1"},
+    ]
+
+    strategy.execute.return_value = True
+
+    with patch(
+        "automation.core.worker.AutomationFactory.create_automation",
+        return_value=automation,
+    ), patch(
+        "automation.core.worker.AutomationFactory.create_strategy",
+        return_value=strategy,
+    ), patch.object(
+        AutomationWorker,
+        "_wait",
+        side_effect=KeyboardInterrupt,
+    ), patch.object(
+        AutomationWorker,
+        "_save_and_publish_state",
+    ):
+
+        worker = create_worker()
+
+        try:
+            worker._execute()
+        except KeyboardInterrupt:
+            pass
+
+    assert strategy.check.call_count == 2
+
+    strategy.check.assert_any_call(
+        automation,
+    )
+
+
+def test_worker_does_not_recheck_after_failed_execution():
+    automation = MagicMock()
+    strategy = MagicMock()
+
+    state = {
+        "credits": 100,
+        "providers": [],
+    }
+
+    strategy.check.return_value = state
+
+    strategy.get_targets.return_value = [
+        {"id": "1"},
+    ]
+
+    strategy.execute.return_value = False
+
+    with patch(
+        "automation.core.worker.AutomationFactory.create_automation",
+        return_value=automation,
+    ), patch(
+        "automation.core.worker.AutomationFactory.create_strategy",
+        return_value=strategy,
+    ), patch.object(
+        AutomationWorker,
+        "_wait",
+        side_effect=KeyboardInterrupt,
+    ), patch.object(
+        AutomationWorker,
+        "_save_and_publish_state",
+    ):
+
+        worker = create_worker()
+
+        try:
+            worker._execute()
+        except KeyboardInterrupt:
+            pass
+
+    strategy.check.assert_called_once_with(
+        automation,
+    )
+
+
+def test_worker_continues_when_target_execution_fails():
+    automation = MagicMock()
+    strategy = MagicMock()
+
+    state = {
+        "credits": 100,
+        "providers": [],
+    }
+
+    targets = [
+        {"id": "1"},
+        {"id": "2"},
+    ]
+
+    strategy.check.return_value = state
+    strategy.get_targets.return_value = targets
+
+    strategy.execute.side_effect = [
+        Exception("first target failed"),
+        True,
+    ]
+
+    with patch(
+        "automation.core.worker.AutomationFactory.create_automation",
+        return_value=automation,
+    ), patch(
+        "automation.core.worker.AutomationFactory.create_strategy",
+        return_value=strategy,
+    ), patch.object(
+        AutomationWorker,
+        "_wait",
+        side_effect=KeyboardInterrupt,
+    ), patch.object(
+        AutomationWorker,
+        "_save_and_publish_state",
+    ):
+
+        worker = create_worker()
+
+        try:
+            worker._execute()
+        except KeyboardInterrupt:
+            pass
+
+    assert strategy.execute.call_count == 2
+
+    strategy.execute.assert_any_call(
+        automation,
+        targets[0],
+    )
+
+    strategy.execute.assert_any_call(
+        automation,
+        targets[1],
+    )
+
+
+def test_worker_closes_automation_when_start_fails():
+    automation = MagicMock()
+    strategy = MagicMock()
+
+    automation.start.side_effect = Exception(
+        "start failed"
+    )
+
+    with patch(
+        "automation.core.worker.AutomationFactory.create_automation",
+        return_value=automation,
+    ), patch(
+        "automation.core.worker.AutomationFactory.create_strategy",
+        return_value=strategy,
+    ):
+
+        worker = create_worker()
+
+        try:
+            worker.run()
+        except Exception as exc:
+            assert str(exc) == "start failed"
+
+    automation.start.assert_called_once()
+    automation.close.assert_called_once()
+
+    strategy.initialize.assert_not_called()
+
+
+def test_worker_saves_and_publishes_state():
+    automation = MagicMock()
+    strategy = MagicMock()
+
+    state = {
+        "credits": 100,
+        "providers": [],
+    }
+
+    with patch(
+        "automation.core.worker.AutomationFactory.create_automation",
+        return_value=automation,
+    ), patch(
+        "automation.core.worker.AutomationFactory.create_strategy",
+        return_value=strategy,
+    ), patch(
+        "automation.core.worker.save_state",
+    ) as save_state, patch.object(
+        AutomationWorker,
+        "_publish_state",
+    ) as publish_state:
+
+        worker = create_worker()
+
+        worker._save_and_publish_state(
+            state,
+        )
+
+    expected_state = {
+        "automationId": "test",
+        "automationName": "Test Automation",
+        "lastCheckDateTime": ANY,
+        "credits": 100,
+        "providers": [],
+    }
+
+    expected_state_file = (
+        Path(__file__).resolve().parent.parent.parent
+        / worker.config.state_file
+    )
+
+    save_state.assert_called_once_with(
+        expected_state_file,
+        expected_state,
+    )
+
+    publish_state.assert_called_once_with(
+        expected_state,
+    )
+
+
+@patch("automation.core.worker.requests.post")
+def test_worker_publishes_state_with_api_token(
+    mock_post,
+):
+    worker = create_worker()
+    state = {
+        "automationId": "test",
+        "credits": 100,
+    }
+
+    worker._publish_state(state)
+
+    mock_post.assert_called_once_with(
+        worker.INTERNAL_STATE_URL,
+        json=state,
+        headers={
+            "X-API-Token": "test-api-token",
+            "X-API-Role": "service",
+        },
+        timeout=5,
+    )
+
+
+def test_worker_publishes_state_with_service_token_from_registry(
+    monkeypatch,
+):
+    monkeypatch.delenv(
+        "AUTOMATION_API_TOKEN",
+        raising=False,
+    )
+    monkeypatch.setenv(
+        "AUTOMATION_API_TOKENS",
+        '{"service-token": {"role": "service"}}',
+    )
+
+    assert AutomationWorker._get_api_token() == "service-token"
+
+
+@patch("automation.core.worker.requests.post")
+def test_worker_logs_missing_api_token_once(
+    mock_post,
+    monkeypatch,
+):
+    monkeypatch.delenv(
+        "AUTOMATION_API_TOKEN",
+        raising=False,
+    )
+    monkeypatch.delenv(
+        "AUTOMATION_API_TOKENS",
+        raising=False,
+    )
+    worker = create_worker()
+
+    with patch("builtins.print") as mock_print:
+        worker._publish_state({"automationId": "test"})
+        worker._publish_state({"automationId": "test"})
+
+    mock_post.assert_not_called()
+    mock_print.assert_called_once_with(
+        "Failed to publish automation state: "
+        "AUTOMATION_API_TOKEN or a service token in "
+        "AUTOMATION_API_TOKENS is not configured.",
+        flush=True,
+    )
